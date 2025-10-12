@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.26)
-project(VulkanVisualizer VERSION 0.9.0 LANGUAGES CXX)
+project(VulkanVisualizer VERSION 1.0.0 LANGUAGES CXX)
 
 # ============================================================================
 # Build Options
@@ -9,6 +9,7 @@ option(VV_WITH_GPU_TIMESTAMPS "Enable GPU timestamp queries" ON)
 option(VV_WITH_TONEMAP "Enable tonemapping pass" ON)
 option(VV_WITH_SCREENSHOT "Enable screenshot utilities" ON)
 option(VV_WITH_HOTRELOAD "Enable shader hot-reload" ON)
+option(VV_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 
 # ============================================================================
 # C++ Configuration
@@ -146,10 +147,18 @@ endif()
 if(MSVC)
     target_compile_options(vulkan_visualizer PRIVATE
         $<$<CONFIG:Release>:/O2 /Ot /Oi /GL /fp:fast>
+        # Warnings as errors
+        $<$<BOOL:${VV_WARNINGS_AS_ERRORS}>:/WX>
+        # Standard warning level
+        /W4
     )
 else()
     target_compile_options(vulkan_visualizer PRIVATE
         $<$<CONFIG:Release>:-O3 -ffast-math -fomit-frame-pointer>
+        # Warnings as errors
+        $<$<BOOL:${VV_WARNINGS_AS_ERRORS}>:-Werror>
+        # Enable common warnings
+        -Wall -Wextra -Wpedantic
     )
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|X86_64|AMD64")
         target_compile_options(vulkan_visualizer PRIVATE
@@ -175,6 +184,54 @@ install(DIRECTORY include/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
 )
+
+# Install runtime dependencies (DLLs on Windows)
+if(WIN32)
+    # Install SDL3 DLL
+    if(TARGET SDL3-shared)
+        install(FILES $<TARGET_FILE:SDL3-shared>
+            DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+    endif()
+
+    # Install Vulkan DLL if present in build directory
+    if(EXISTS "${CMAKE_BINARY_DIR}/bin/$<CONFIG>/vulkan-1.dll")
+        install(FILES "${CMAKE_BINARY_DIR}/bin/$<CONFIG>/vulkan-1.dll"
+            DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+    endif()
+
+    # Install runtime dependencies using CMake's file(GET_RUNTIME_DEPENDENCIES)
+    # This will be executed during install, not during configure
+    install(CODE "
+        file(GET_RUNTIME_DEPENDENCIES
+            RESOLVED_DEPENDENCIES_VAR _resolved_deps
+            UNRESOLVED_DEPENDENCIES_VAR _unresolved_deps
+            LIBRARIES \${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/vulkan_visualizer.lib
+            EXECUTABLES
+            DIRECTORIES
+                \$ENV{PATH}
+                ${CMAKE_BINARY_DIR}/bin/\${CMAKE_INSTALL_CONFIG_NAME}
+                ${CMAKE_BINARY_DIR}/bin
+        )
+
+        foreach(_dep \${_resolved_deps})
+            get_filename_component(_dep_name \"\${_dep}\" NAME)
+            # Only copy DLLs we explicitly depend on (SDL3, avoid system DLLs)
+            if(_dep_name MATCHES \"^SDL3.*\\.dll$\" OR _dep_name MATCHES \"^vulkan.*\\.dll$\")
+                file(INSTALL \"\${_dep}\"
+                    DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}\"
+                    FOLLOW_SYMLINK_CHAIN
+                )
+                message(STATUS \"Installed runtime dependency: \${_dep_name}\")
+            endif()
+        endforeach()
+
+        if(_unresolved_deps)
+            message(WARNING \"Unresolved runtime dependencies: \${_unresolved_deps}\")
+        endif()
+    ")
+endif()
 
 set(_config_dir ${CMAKE_INSTALL_LIBDIR}/cmake/VulkanVisualizer)
 
