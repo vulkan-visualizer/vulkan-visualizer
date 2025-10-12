@@ -51,36 +51,31 @@ jobs:
       - name: Configure (Ninja Multi-Config)
         shell: powershell
         run: |
-          cmake -S . -B build -G "Ninja Multi-Config" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake -S . -B build -G "Ninja Multi-Config" `
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON `
+            -DVV_WARNINGS_AS_ERRORS=ON `
+            -DCMAKE_INSTALL_PREFIX=install
 
       - name: Build (${{ matrix.build_type }})
         shell: powershell
         run: |
           cmake --build build --config ${{ matrix.build_type }} --parallel
 
-      - name: Package artifacts (${{ matrix.build_type }})
+      - name: Install to staging directory (${{ matrix.build_type }})
+        shell: powershell
+        run: |
+          cmake --install build --config ${{ matrix.build_type }} --prefix install
+
+      - name: Package portable release (${{ matrix.build_type }})
         if: success()
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          $cfg='${{ matrix.build_type }}'
-          $exe = "build/examples/$cfg/basic_window.exe"
-          if (Test-Path $exe) { Copy-Item $exe artifacts/ }
-          $sdl = "build/examples/$cfg/SDL3.dll"; if (Test-Path $sdl) { Copy-Item $sdl artifacts/ }
-          $lib = "build/$cfg/vulkan_visualizer.lib"; if (Test-Path $lib) { Copy-Item $lib artifacts/ }
-          $pdb = "build/$cfg/vulkan_visualizer.pdb"; if (Test-Path $pdb) { Copy-Item $pdb artifacts/ }
-          if (Test-Path "$env:VULKAN_SDK\Bin\glslc.exe") { Copy-Item "$env:VULKAN_SDK\Bin\glslc.exe" artifacts/ }
+          Compress-Archive -Path install\* -DestinationPath vulkan-visualizer-windows-x64-${{ matrix.build_type }}.zip
 
-      - name: Upload artifacts (${{ matrix.build_type }})
+      - name: Upload build artifacts (${{ matrix.build_type }})
         uses: actions/upload-artifact@v4
         with:
           name: windows-${{ matrix.build_type }}
-          path: artifacts
+          path: vulkan-visualizer-windows-x64-${{ matrix.build_type }}.zip
           if-no-files-found: error
           retention-days: 7
-
-      - name: List shader outputs (${{ matrix.build_type }})
-        if: success()
-        shell: powershell
-        run: |
-          if (Test-Path build/examples/shaders) { Get-ChildItem build/examples/shaders } else { Write-Host 'No shaders directory.' }

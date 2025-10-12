@@ -53,31 +53,31 @@ jobs:
 
       - name: Configure (${{ matrix.build_type }})
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DVV_WARNINGS_AS_ERRORS=ON \
+            -DCMAKE_INSTALL_PREFIX=install
 
       - name: Build (${{ matrix.build_type }})
         run: |
           cmake --build build --config ${{ matrix.build_type }} --parallel
 
-      - name: Package artifacts (${{ matrix.build_type }})
+      - name: Install to staging directory (${{ matrix.build_type }})
+        run: |
+          cmake --install build --prefix install
+
+      - name: Package portable release (${{ matrix.build_type }})
         if: success()
         run: |
-          mkdir -p artifacts
-          EXE=build/examples/basic_window
-          [ -f "$EXE" ] && cp "$EXE" artifacts/
-          LIB=build/libvulkan_visualizer.a
-          [ -f "$LIB" ] && cp "$LIB" artifacts/
-          [ -f "$VULKAN_SDK/bin/glslc" ] && cp "$VULKAN_SDK/bin/glslc" artifacts/
+          cd install
+          tar -czf ../vulkan-visualizer-linux-x64-${{ matrix.build_type }}.tar.gz .
+          cd ..
 
-      - name: Upload artifacts (${{ matrix.build_type }})
+      - name: Upload build artifacts (${{ matrix.build_type }})
         uses: actions/upload-artifact@v4
         with:
           name: linux-${{ matrix.build_type }}
-          path: artifacts
+          path: vulkan-visualizer-linux-x64-${{ matrix.build_type }}.tar.gz
           if-no-files-found: error
           retention-days: 7
-
-      - name: Shader dir list (${{ matrix.build_type }})
-        if: success()
-        run: |
-          ls -al build/examples/shaders || echo 'No shaders dir'
