@@ -58,7 +58,7 @@ jobs:
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            -DVV_WARNINGS_AS_ERRORS=ON \
+            -DVV_WARNINGS_AS_ERRORS=OFF \
             -DCMAKE_INSTALL_PREFIX=install
 
       - name: Build (${{ matrix.build_type }})

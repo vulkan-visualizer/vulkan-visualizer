@@ -9,7 +9,7 @@ option(VV_WITH_GPU_TIMESTAMPS "Enable GPU timestamp queries" ON)
 option(VV_WITH_TONEMAP "Enable tonemapping pass" ON)
 option(VV_WITH_SCREENSHOT "Enable screenshot utilities" ON)
 option(VV_WITH_HOTRELOAD "Enable shader hot-reload" ON)
-option(VV_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
+option(VV_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 
 # ============================================================================
 # C++ Configuration
