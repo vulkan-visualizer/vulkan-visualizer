@@ -114,6 +114,8 @@ add_library(VulkanVisualizer::vulkan_visualizer ALIAS vulkan_visualizer)
 target_include_directories(vulkan_visualizer PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
+    # Install interface needs third-party headers
+    $<INSTALL_INTERFACE:include/vulkan_visualizer/third_party>
 )
 
 target_compile_definitions(vulkan_visualizer PUBLIC
@@ -128,12 +130,12 @@ target_link_libraries(vulkan_visualizer PUBLIC Vulkan::Vulkan)
 
 # Private include directories for embedded dependencies
 target_include_directories(vulkan_visualizer PRIVATE
-    ${imgui_src_SOURCE_DIR}
-    ${imgui_src_SOURCE_DIR}/backends
-    ${vk_bootstrap_SOURCE_DIR}/src
-    ${sdl3_SOURCE_DIR}/include
-    ${vma_src_SOURCE_DIR}/include
-    ${stb_SOURCE_DIR}
+    $<BUILD_INTERFACE:${imgui_src_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${imgui_src_SOURCE_DIR}/backends>
+    $<BUILD_INTERFACE:${vk_bootstrap_SOURCE_DIR}/src>
+    $<BUILD_INTERFACE:${sdl3_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${vma_src_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${stb_SOURCE_DIR}>
 )
 
 # Link SDL3 (wrapped to avoid export)
@@ -192,9 +194,56 @@ install(TARGETS vulkan_visualizer
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
+# Install main headers
 install(DIRECTORY include/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+)
+
+# Install third-party headers that are embedded in the library
+set(_third_party_install_dir ${CMAKE_INSTALL_INCLUDEDIR}/vulkan_visualizer/third_party)
+
+# ImGui headers
+install(FILES
+    ${imgui_src_SOURCE_DIR}/imgui.h
+    ${imgui_src_SOURCE_DIR}/imconfig.h
+    ${imgui_src_SOURCE_DIR}/imgui_internal.h
+    ${imgui_src_SOURCE_DIR}/imstb_rectpack.h
+    ${imgui_src_SOURCE_DIR}/imstb_textedit.h
+    ${imgui_src_SOURCE_DIR}/imstb_truetype.h
+    DESTINATION ${_third_party_install_dir}/imgui
+)
+
+install(FILES
+    ${imgui_src_SOURCE_DIR}/backends/imgui_impl_sdl3.h
+    ${imgui_src_SOURCE_DIR}/backends/imgui_impl_vulkan.h
+    DESTINATION ${_third_party_install_dir}/imgui/backends
+)
+
+# SDL3 headers
+install(DIRECTORY ${sdl3_SOURCE_DIR}/include/
+    DESTINATION ${_third_party_install_dir}/SDL3
+    FILES_MATCHING PATTERN "*.h"
+)
+
+# VMA header
+install(FILES
+    ${vma_src_SOURCE_DIR}/include/vk_mem_alloc.h
+    DESTINATION ${_third_party_install_dir}/vma
+)
+
+# vk-bootstrap header
+install(FILES
+    ${vk_bootstrap_SOURCE_DIR}/src/VkBootstrap.h
+    ${vk_bootstrap_SOURCE_DIR}/src/VkBootstrapDispatch.h
+    DESTINATION ${_third_party_install_dir}/vk-bootstrap
+)
+
+# stb headers
+install(FILES
+    ${stb_SOURCE_DIR}/stb_image_write.h
+    ${stb_SOURCE_DIR}/stb_image.h
+    DESTINATION ${_third_party_install_dir}/stb
 )
 
 # Install runtime dependencies (DLLs on Windows)
@@ -203,6 +252,20 @@ if(WIN32)
     if(TARGET SDL3-shared)
         install(FILES $<TARGET_FILE:SDL3-shared>
             DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+    endif()
+    # Install SDL3 import library (.lib)
+    if(TARGET SDL3-shared)
+        install(FILES $<TARGET_LINKER_FILE:SDL3-shared>
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        )
+    endif()
+else()
+    # On Linux/macOS, install SDL3 shared library
+    if(TARGET SDL3-shared)
+        install(TARGETS SDL3-shared
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         )
     endif()
 endif()

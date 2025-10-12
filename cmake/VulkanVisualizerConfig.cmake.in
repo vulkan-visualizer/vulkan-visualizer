@@ -8,10 +8,25 @@
 include(CMakeFindDependencyMacro)
 find_dependency(Vulkan REQUIRED)
 
+# Find SDL3 if it's installed separately, otherwise use the bundled DLL
+if(WIN32)
+    # On Windows, we bundle SDL3.dll, so add the bin directory to PATH
+    set(VulkanVisualizer_DLL_DIR "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_BINDIR@")
+    if(EXISTS "${VulkanVisualizer_DLL_DIR}/SDL3.dll")
+        list(APPEND CMAKE_PREFIX_PATH "${PACKAGE_PREFIX_DIR}")
+    endif()
+endif()
+
 include(${CMAKE_CURRENT_LIST_DIR}/VulkanVisualizerTargets.cmake)
 
 set(VulkanVisualizer_VERSION @PROJECT_VERSION@)
 set(VulkanVisualizer_FOUND TRUE)
+
+# Set include directories for third-party dependencies
+set(VulkanVisualizer_INCLUDE_DIRS
+    "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@"
+    "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@/vulkan_visualizer/third_party"
+)
 
 if(NOT VulkanVisualizer_FIND_QUIETLY)
     message(STATUS "Found VulkanVisualizer ${VulkanVisualizer_VERSION}")
