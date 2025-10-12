@@ -114,8 +114,6 @@ add_library(VulkanVisualizer::vulkan_visualizer ALIAS vulkan_visualizer)
 target_include_directories(vulkan_visualizer PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
-    # Install interface needs third-party headers
-    $<INSTALL_INTERFACE:include/vulkan_visualizer/third_party>
 )
 
 target_compile_definitions(vulkan_visualizer PUBLIC
