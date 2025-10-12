@@ -1,13 +1,3 @@
-# ============================================================================
-# setup_stb.cmake (modern)
-# Fetch nothings/stb via FetchContent and expose STB::stb interface target.
-# Utilities:
-#   - use_stb(<target>)
-#   - stb_add_implementation(<target> COMPONENTS [image;image_write;image_resize;image_resize2])
-#     Generates a per-target implementation TU that defines the selected
-#     STB_xxx_IMPLEMENTATION macros exactly once and adds it to the target.
-# ============================================================================
-
 if(DEFINED _SETUP_STB_INCLUDED)
     return()
 endif()
@@ -25,7 +15,6 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(stb)
 
-# Interface target exposing headers
 if(NOT TARGET STB::stb)
     add_library(STB::stb INTERFACE IMPORTED)
     set_target_properties(STB::stb PROPERTIES
@@ -43,7 +32,6 @@ function(use_stb TARGET_NAME)
     target_link_libraries(${TARGET_NAME} PUBLIC STB::stb)
 endfunction()
 
-# Generate an implementation TU for selected components and add to target
 function(stb_add_implementation TARGET_NAME)
     if(NOT TARGET ${TARGET_NAME})
         message(FATAL_ERROR "stb_add_implementation called with unknown target `${TARGET_NAME}`")
@@ -54,11 +42,9 @@ function(stb_add_implementation TARGET_NAME)
     cmake_parse_arguments(_STB "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
     if(NOT _STB_COMPONENTS)
-        # default to image + image_write
         set(_STB_COMPONENTS image image_write)
     endif()
 
-    # Avoid adding multiple times
     get_property(_added TARGET ${TARGET_NAME} PROPERTY _STB_IMPL_ADDED SET)
     if(_added)
         message(STATUS "stb_add_implementation: implementation already added to ${TARGET_NAME}; skipping")
@@ -90,9 +76,7 @@ function(stb_add_implementation TARGET_NAME)
 
     target_sources(${TARGET_NAME} PRIVATE "${_impl_path}")
     target_link_libraries(${TARGET_NAME} PRIVATE STB::stb)
-    # Ensure headers are visible even if consumers include from source
     target_include_directories(${TARGET_NAME} PRIVATE "${stb_SOURCE_DIR}")
 
     set_property(TARGET ${TARGET_NAME} PROPERTY _STB_IMPL_ADDED TRUE)
 endfunction()
-

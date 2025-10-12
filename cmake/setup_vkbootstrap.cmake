@@ -1,9 +1,3 @@
-# ============================================================================
-# setup_vkbootstrap.cmake (modern)
-# Fetch vk-bootstrap via FetchContent and expose vk-bootstrap::vk-bootstrap.
-# Exposes: use_vkbootstrap(<target>)
-# ============================================================================
-
 if (DEFINED _SETUP_VKBOOTSTRAP_INCLUDED)
     return()
 endif ()
@@ -19,7 +13,6 @@ if (NOT Vulkan_VERSION)
 endif ()
 set(VK_BOOTSTRAP_GIT_TAG "v${Vulkan_VERSION}" CACHE STRING "vk-bootstrap git tag/commit")
 
-# Silence warnings as errors in vk-bootstrap if any
 set(VK_BOOTSTRAP_WERROR OFF CACHE BOOL "" FORCE)
 set(VK_BOOTSTRAP_INSTALL OFF CACHE BOOL "" FORCE)
 
@@ -31,7 +24,6 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(vk_bootstrap)
 
-# Fallback: if upstream target name changes, try to create one
 if (NOT TARGET vk-bootstrap::vk-bootstrap)
     if (TARGET vk-bootstrap)
         add_library(vk-bootstrap::vk-bootstrap ALIAS vk-bootstrap)

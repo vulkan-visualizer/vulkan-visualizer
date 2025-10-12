@@ -1,9 +1,3 @@
-# ============================================================================
-# setup_sdl3.cmake (modern)
-# Fetch SDL3 via FetchContent and expose SDL3::SDL3 target.
-# Exposes: use_sdl3(<target>)
-# ============================================================================
-
 if(DEFINED _SETUP_SDL3_INCLUDED)
     return()
 endif()
@@ -13,7 +7,6 @@ include(FetchContent)
 
 set(SDL3_GIT_TAG "release-3.2.2" CACHE STRING "SDL3 git tag/branch to fetch")
 
-# Common SDL options
 set(SDL_TESTS OFF CACHE BOOL "" FORCE)
 set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(SDL_INSTALL_TESTS OFF CACHE BOOL "" FORCE)
@@ -26,7 +19,6 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(SDL3)
 
-# SDL3 provides SDL3::SDL3 imported/alias target
 function(use_sdl3 TARGET_NAME)
     if(NOT TARGET ${TARGET_NAME})
         message(FATAL_ERROR "use_sdl3 called with unknown target `${TARGET_NAME}`")
@@ -37,7 +29,6 @@ function(use_sdl3 TARGET_NAME)
     target_link_libraries(${TARGET_NAME} PUBLIC SDL3::SDL3)
 
     if(WIN32)
-        # Auto-copy runtime DLLs for executable/shared targets
         get_target_property(_t ${TARGET_NAME} TYPE)
         if(_t STREQUAL "EXECUTABLE" OR _t STREQUAL "SHARED_LIBRARY" OR _t STREQUAL "MODULE_LIBRARY")
             get_property(_sdl3_copied TARGET ${TARGET_NAME} PROPERTY _SDL3_RUNTIME_COPIED SET)

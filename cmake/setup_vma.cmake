@@ -1,9 +1,3 @@
-# ============================================================================
-# setup_vma.cmake (modern)
-# Fetch VMA via FetchContent (URL) and expose VMA::VMA header-only target.
-# Exposes: use_vma(<target>)
-# ============================================================================
-
 if(DEFINED _SETUP_VMA_INCLUDED)
     return()
 endif()
@@ -21,7 +15,6 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(VMA_src)
 
-# Determine source dir robustly
 set(_VMA_SRC_DIR "${FETCHCONTENT_SOURCE_DIR_VMA_SRC}")
 if(NOT _VMA_SRC_DIR)
     if(DEFINED VMA_src_SOURCE_DIR)
@@ -31,7 +24,6 @@ if(NOT _VMA_SRC_DIR)
     endif()
 endif()
 
-# Fallback guesses if still empty
 if(NOT _VMA_SRC_DIR)
     set(_cand1 "${CMAKE_BINARY_DIR}/_deps/vma_src-src")
     set(_cand2 "${CMAKE_BINARY_DIR}/_deps/VulkanMemoryAllocator-${VMA_VERSION}")
@@ -46,7 +38,6 @@ if(NOT _VMA_SRC_DIR)
     message(WARNING "Could not determine VMA source directory; falling back to single-header download")
 endif()
 
-# Compose include dir and validate; if missing, fallback to single-header download
 set(VMA_INCLUDE_DIR "${_VMA_SRC_DIR}/include" CACHE PATH "Path to VMA headers" FORCE)
 if(NOT _VMA_SRC_DIR OR NOT EXISTS "${VMA_INCLUDE_DIR}/vk_mem_alloc.h")
     set(_vma_single_dir "${CMAKE_BINARY_DIR}/_deps/vma_single/include")

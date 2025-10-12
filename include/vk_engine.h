@@ -2,8 +2,6 @@
 #define VULKAN_VISUALIZER_VK_ENGINE_H
 
 #include <SDL3/SDL.h>
-#include <vulkan/vulkan.h>
-
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -12,19 +10,17 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <vulkan/vulkan.h>
 
-// Minimal UI tabs host interface exposed via EngineContext.services (if ImGui is enabled)
 namespace vv_ui {
-struct TabsHost {
-    virtual ~TabsHost() = default;
-    virtual void add_tab(const char* name, std::function<void()> fn) = 0;     // per-frame ephemeral tabs
-    virtual void set_main_window_title(const char* title) = 0;                // optional
-    // New: per-frame overlay callbacks (drawn after tabs, before ImGui::Render)
-    virtual void add_overlay(std::function<void()> fn) = 0;
-};
-} // namespace vv_ui
+    struct TabsHost {
+        virtual ~TabsHost()                                              = default;
+        virtual void add_tab(const char* name, std::function<void()> fn) = 0;
+        virtual void set_main_window_title(const char* title)            = 0;
+        virtual void add_overlay(std::function<void()> fn)               = 0;
+    };
+}
 
-// VMA handle fwd decls
 struct VmaAllocator_T; using VmaAllocator = VmaAllocator_T*;
 struct VmaAllocation_T; using VmaAllocation = VmaAllocation_T*;
 
@@ -88,7 +84,7 @@ struct EngineContext {
     uint32_t compute_queue_family{};
     uint32_t transfer_queue_family{};
     uint32_t present_queue_family{};
-    void* services{}; // if ImGui enabled: points to vv_ui::TabsHost, otherwise nullptr
+    void* services{};
 };
 
 struct FrameContext {
@@ -174,9 +170,9 @@ class VulkanEngine {
 public:
     VulkanEngine();
     ~VulkanEngine();
-    VulkanEngine(const VulkanEngine&) = delete;
-    VulkanEngine& operator=(const VulkanEngine&) = delete;
-    VulkanEngine(VulkanEngine&&) noexcept = default;
+    VulkanEngine(const VulkanEngine&)                = delete;
+    VulkanEngine& operator=(const VulkanEngine&)     = delete;
+    VulkanEngine(VulkanEngine&&) noexcept            = default;
     VulkanEngine& operator=(VulkanEngine&&) noexcept = default;
     void init();
     void run();
@@ -225,9 +221,30 @@ private:
     void create_renderer_targets(VkExtent2D extent);
     void destroy_renderer_targets();
 
-    struct AllocatedImage { VkImage image{}; VkImageView imageView{}; VmaAllocation allocation{}; VkExtent3D imageExtent{}; VkFormat imageFormat{}; };
-    struct AttachmentResource { std::string name; VkImageUsageFlags usage{}; VkImageAspectFlags aspect{}; VkSampleCountFlagBits samples{VK_SAMPLE_COUNT_1_BIT}; VkImageLayout initial_layout{VK_IMAGE_LAYOUT_GENERAL}; AllocatedImage image; };
-    struct SwapchainSystem { VkSwapchainKHR swapchain{}; VkFormat swapchain_image_format{}; VkExtent2D swapchain_extent{}; std::vector<VkImage> swapchain_images; std::vector<VkImageView> swapchain_image_views; std::vector<AttachmentResource> color_attachments; std::optional<AttachmentResource> depth_attachment; } swapchain_{};
+    struct AllocatedImage {
+        VkImage image{};
+        VkImageView imageView{};
+        VmaAllocation allocation{};
+        VkExtent3D imageExtent{};
+        VkFormat imageFormat{};
+    };
+    struct AttachmentResource {
+        std::string name;
+        VkImageUsageFlags usage{};
+        VkImageAspectFlags aspect{};
+        VkSampleCountFlagBits samples{VK_SAMPLE_COUNT_1_BIT};
+        VkImageLayout initial_layout{VK_IMAGE_LAYOUT_GENERAL};
+        AllocatedImage image;
+    };
+    struct SwapchainSystem {
+        VkSwapchainKHR swapchain{};
+        VkFormat swapchain_image_format{};
+        VkExtent2D swapchain_extent{};
+        std::vector<VkImage> swapchain_images;
+        std::vector<VkImageView> swapchain_image_views;
+        std::vector<AttachmentResource> color_attachments;
+        std::optional<AttachmentResource> depth_attachment;
+    } swapchain_{};
 
     std::vector<AttachmentView> frame_attachment_views_;
     AttachmentView depth_attachment_view_{};
@@ -259,7 +276,7 @@ private:
     std::unique_ptr<IRenderer> renderer_;
     RendererCaps renderer_caps_{};
 
-    struct UiSystem; // implemented privately; exposed via vv_ui::TabsHost through EngineContext.services
+    struct UiSystem;
     void create_imgui();
     void destroy_imgui();
     std::unique_ptr<UiSystem> ui_;
@@ -278,12 +295,18 @@ private:
 #endif
 
 #ifdef VV_ENABLE_SCREENSHOT
-    struct PendingScreenshot { bool request{false}; std::string path; } screenshot_{};
+    struct PendingScreenshot {
+        bool request{false};
+        std::string path;
+    } screenshot_{};
     void queue_swapchain_screenshot(VkCommandBuffer cmd, uint32_t imageIndex);
 #endif
 
 #ifdef VV_ENABLE_HOTRELOAD
-    struct WatchItem { std::string path; uint64_t stamp{}; };
+    struct WatchItem {
+        std::string path;
+        uint64_t stamp{};
+    };
     std::vector<WatchItem> watch_list_;
     double watch_accum_{0.0};
     void poll_file_watches(const EngineContext& eng);
@@ -294,7 +317,20 @@ private:
     bool tonemap_enabled_{false};
 #endif
 
-    struct EngineState { uint32_t width{1280}; uint32_t height{720}; std::string name{"Vulkan Visualizer"}; bool running{false}; bool initialized{false}; bool should_rendering{false}; bool resize_requested{false}; bool minimized{false}; bool focused{true}; uint64_t frame_number{0}; double time_sec{0.0}; double dt_sec{0.0}; } state_;
+    struct EngineState {
+        uint32_t width{1280};
+        uint32_t height{720};
+        std::string name{"Vulkan Visualizer"};
+        bool running{false};
+        bool initialized{false};
+        bool should_rendering{false};
+        bool resize_requested{false};
+        bool minimized{false};
+        bool focused{true};
+        uint64_t frame_number{0};
+        double time_sec{0.0};
+        double dt_sec{0.0};
+    } state_;
 };
 
-#endif // VULKAN_VISUALIZER_VK_ENGINE_H
+#endif

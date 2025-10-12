@@ -1,11 +1,3 @@
-# ============================================================================
-# setup_imgui.cmake (modern)
-# Fetch Dear ImGui (docking) via FetchContent and define imgui target/backends.
-# Exposes:
-#   - use_imgui(<target>)
-#   - imgui_enable_backends(<target> BACKENDS sdl3;vulkan)
-# ============================================================================
-
 if(DEFINED _SETUP_IMGUI_INCLUDED)
     return()
 endif()
@@ -15,7 +7,6 @@ include(FetchContent)
 
 set(IMGUI_VERSION "v1.92.2b-docking" CACHE STRING "Dear ImGui docking tag/commit")
 
-# Fetch imgui sources
 FetchContent_Declare(
     imgui_src
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
@@ -24,11 +15,9 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(imgui_src)
 
-# imgui source dir
 set(IMGUI_SOURCE_DIR ${imgui_src_SOURCE_DIR})
 set(IMGUI_INCLUDE_DIR ${IMGUI_SOURCE_DIR})
 
-# Core sources
 set(_IMGUI_CORE_SOURCES
     ${IMGUI_SOURCE_DIR}/imgui.cpp
     ${IMGUI_SOURCE_DIR}/imgui_demo.cpp
