@@ -9,7 +9,7 @@ option(VV_WITH_GPU_TIMESTAMPS "Enable GPU timestamp queries" ON)
 option(VV_WITH_TONEMAP "Enable tonemapping pass" ON)
 option(VV_WITH_SCREENSHOT "Enable screenshot utilities" ON)
 option(VV_WITH_HOTRELOAD "Enable shader hot-reload" ON)
-option(VV_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+option(VV_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 
 # ============================================================================
 # C++ Configuration
@@ -126,7 +126,7 @@ target_compile_definitions(vulkan_visualizer PUBLIC
 
 target_link_libraries(vulkan_visualizer PUBLIC Vulkan::Vulkan)
 
-# Private implementation
+# Private include directories for embedded dependencies
 target_include_directories(vulkan_visualizer PRIVATE
     ${imgui_src_SOURCE_DIR}
     ${imgui_src_SOURCE_DIR}/backends
@@ -141,6 +141,18 @@ if(TARGET SDL3-shared)
     target_link_libraries(vulkan_visualizer PRIVATE $<BUILD_INTERFACE:SDL3-shared>)
 elseif(TARGET SDL3::SDL3)
     target_link_libraries(vulkan_visualizer PRIVATE $<BUILD_INTERFACE:SDL3::SDL3>)
+endif()
+
+# Disable specific warnings for third-party sources
+if(MSVC)
+    # Disable C4819 (encoding warning) for third-party files that include SDL3/vk-bootstrap headers
+    set_source_files_properties(
+        src/vk_engine.cpp
+        src/vv_camera.cpp
+        ${_THIRD_PARTY_SOURCES}
+        PROPERTIES
+        COMPILE_FLAGS "/wd4819"
+    )
 endif()
 
 # Compiler optimizations

@@ -343,8 +343,8 @@ namespace vv {
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
             {
                 if (imgui_capturing_mouse()) break;
-                const int mx = e.button.x;
-                const int my = e.button.y;
+                const int mx = static_cast<int>(e.button.x);
+                const int my = static_cast<int>(e.button.y);
                 if (e.button.button == SDL_BUTTON_LEFT) {
                     lmb_ = true;
                 }
@@ -369,8 +369,8 @@ namespace vv {
             }
         case SDL_EVENT_MOUSE_BUTTON_UP:
             {
-                const int mx = e.button.x;
-                const int my = e.button.y;
+                const int mx = static_cast<int>(e.button.x);
+                const int my = static_cast<int>(e.button.y);
                 if (e.button.button == SDL_BUTTON_LEFT) {
                     lmb_          = false;
                     nav_orbiting_ = false;
@@ -391,10 +391,10 @@ namespace vv {
         case SDL_EVENT_MOUSE_MOTION:
             {
                 if (imgui_capturing_mouse()) break;
-                const int mx = e.motion.x;
-                const int my = e.motion.y;
-                const int dx = e.motion.xrel;
-                const int dy = e.motion.yrel;
+                const int mx = static_cast<int>(e.motion.x);
+                const int my = static_cast<int>(e.motion.y);
+                const int dx = static_cast<int>(e.motion.xrel);
+                const int dy = static_cast<int>(e.motion.yrel);
                 if (houdini_nav_active()) {
                     if (nav_orbiting_) {
                         update_orbit_drag_(mx, my, false);
@@ -548,7 +548,7 @@ namespace vv {
         while (pos < s.size() && (s[pos] == ' ' || s[pos] == ':' || s[pos] == ',' || s[pos] == '[' || s[pos] == '\n' || s[pos] == '\r' || s[pos] == '\t')) ++pos;
         size_t start = pos;
         while (pos < s.size() && (std::isdigit((unsigned char) s[pos]) || s[pos] == '-' || s[pos] == '+' || s[pos] == '.' || s[pos] == 'e' || s[pos] == 'E')) ++pos;
-        return std::atof(std::string(s.substr(start, pos - start)).c_str());
+        return static_cast<float>(std::atof(std::string(s.substr(start, pos - start)).c_str()));
     }
 
     bool CameraService::load_from_file(const std::string& path) {
