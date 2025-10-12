@@ -1,0 +1,18 @@
+# VulkanVisualizerConfig.cmake
+# =============================================================================
+# This file allows other projects to use VulkanVisualizer via find_package()
+# =============================================================================
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Vulkan REQUIRED)
+
+include(${CMAKE_CURRENT_LIST_DIR}/VulkanVisualizerTargets.cmake)
+
+set(VulkanVisualizer_VERSION @PROJECT_VERSION@)
+set(VulkanVisualizer_FOUND TRUE)
+
+if(NOT VulkanVisualizer_FIND_QUIETLY)
+    message(STATUS "Found VulkanVisualizer ${VulkanVisualizer_VERSION}")
+endif()

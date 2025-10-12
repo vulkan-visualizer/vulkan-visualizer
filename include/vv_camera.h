@@ -1,12 +1,14 @@
 #ifndef VULKAN_VISUALIZER_VV_CAMERA_H
 #define VULKAN_VISUALIZER_VV_CAMERA_H
 
-#include <SDL3/SDL.h>
 #include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
 #include <array>
+
+struct SDL_Window;
+union SDL_Event;
 
 struct EngineContext;
 struct FrameContext;

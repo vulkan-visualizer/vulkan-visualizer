@@ -1,63 +1,208 @@
 cmake_minimum_required(VERSION 3.26)
 project(VulkanVisualizer VERSION 0.9.0 LANGUAGES CXX)
 
-option(VV_WITH_LOGGING "Enable engine logging system and ImGui log panel" ON)
-option(VV_WITH_GPU_TIMESTAMPS "Enable GPU timestamp queries for frame timing" ON)
-option(VV_WITH_TONEMAP "Enable engine tonemapping pass (fullscreen)" ON)
-option(VV_WITH_SCREENSHOT "Enable screenshot utilities (PNG)" ON)
-option(VV_WITH_HOTRELOAD "Enable simple file watcher and shader hot-reload hook" ON)
+# ============================================================================
+# Build Options
+# ============================================================================
+option(VV_WITH_LOGGING "Enable logging system" ON)
+option(VV_WITH_GPU_TIMESTAMPS "Enable GPU timestamp queries" ON)
+option(VV_WITH_TONEMAP "Enable tonemapping pass" ON)
+option(VV_WITH_SCREENSHOT "Enable screenshot utilities" ON)
+option(VV_WITH_HOTRELOAD "Enable shader hot-reload" ON)
 
+# ============================================================================
+# C++ Configuration
+# ============================================================================
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-include(cmake/setup_imgui.cmake)
-include(cmake/setup_sdl3.cmake)
-include(cmake/setup_vkbootstrap.cmake)
-include(cmake/setup_vma.cmake)
-include(cmake/setup_stb.cmake)
+# Output directories
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
+# ============================================================================
+# Dependencies
+# ============================================================================
+# Only PUBLIC dependency (exposed in headers)
 find_package(Vulkan REQUIRED)
 
-set(libname vulkan_visualizer)
-set(${libname}_SOURCES
-        src/vk_engine.cpp
-        src/vv_camera.cpp)
+# Fetch all internal dependencies
+include(FetchContent)
 
-add_library(${libname} STATIC ${${libname}_SOURCES})
+FetchContent_Declare(imgui_src
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG v1.92.2b-docking
+    GIT_SHALLOW TRUE
+)
 
-target_compile_definitions(${libname} PUBLIC
-        $<$<BOOL:${VV_WITH_LOGGING}>:VV_ENABLE_LOGGING>
-        $<$<BOOL:${VV_WITH_GPU_TIMESTAMPS}>:VV_ENABLE_GPU_TIMESTAMPS>
-        $<$<BOOL:${VV_WITH_TONEMAP}>:VV_ENABLE_TONEMAP>
-        $<$<BOOL:${VV_WITH_SCREENSHOT}>:VV_ENABLE_SCREENSHOT>
-        $<$<BOOL:${VV_WITH_HOTRELOAD}>:VV_ENABLE_HOTRELOAD>)
+set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(SDL3
+    GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+    GIT_TAG release-3.2.2
+    GIT_SHALLOW TRUE
+)
 
-target_include_directories(${libname} PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+set(VK_BOOTSTRAP_WERROR OFF CACHE BOOL "" FORCE)
+set(VK_BOOTSTRAP_INSTALL OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(vk_bootstrap
+    GIT_REPOSITORY https://github.com/charles-lunarg/vk-bootstrap.git
+    GIT_TAG v${Vulkan_VERSION}
+    GIT_SHALLOW TRUE
+)
 
-target_link_libraries(${libname} PUBLIC Vulkan::Vulkan)
-use_imgui(${libname})
-use_sdl3(${libname})
-use_vkbootstrap(${libname})
-use_vma(${libname})
-use_stb(${libname})
-stb_add_implementation(${libname} COMPONENTS image_write)
+FetchContent_Declare(VMA_src
+    URL https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/archive/refs/tags/v3.3.0.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
 
-imgui_enable_backends(${libname} BACKENDS sdl3 vulkan)
+FetchContent_Declare(stb
+    GIT_REPOSITORY https://github.com/nothings/stb.git
+    GIT_TAG master
+    GIT_SHALLOW TRUE
+)
 
-target_compile_features(${libname} PRIVATE cxx_std_23)
+FetchContent_MakeAvailable(imgui_src SDL3 vk_bootstrap VMA_src stb)
 
-set(MSVC_RELEASE_OPTIONS /O2 /Ot /Oi /GL /fp:fast /arch:AVX2)
-set(GCC_CLANG_RELEASE_OPTIONS_BASE -O3 -ffast-math -fomit-frame-pointer)
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|X86_64|AMD64")
-    list(APPEND GCC_CLANG_RELEASE_OPTIONS_BASE -march=native -mavx2 -mfma)
-endif ()
-set(GCC_CLANG_RELEASE_OPTIONS ${GCC_CLANG_RELEASE_OPTIONS_BASE})
+# ============================================================================
+# Library Target
+# ============================================================================
+# Collect all sources
+set(_THIRD_PARTY_SOURCES
+    ${imgui_src_SOURCE_DIR}/imgui.cpp
+    ${imgui_src_SOURCE_DIR}/imgui_demo.cpp
+    ${imgui_src_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_src_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_src_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_src_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
+    ${imgui_src_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
+    ${vk_bootstrap_SOURCE_DIR}/src/VkBootstrap.cpp
+)
 
-target_compile_options(${libname} PRIVATE
-        $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:${MSVC_RELEASE_OPTIONS}>
-        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:${GCC_CLANG_RELEASE_OPTIONS}>)
+# Generate STB implementation
+set(_STB_IMPL "${CMAKE_CURRENT_BINARY_DIR}/stb_impl.cpp")
+file(WRITE "${_STB_IMPL}"
+"#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4100 4127 4189 4244 4365 4514 4820 4996)
+#endif
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+")
 
+# Create library
+add_library(vulkan_visualizer STATIC
+    src/vk_engine.cpp
+    src/vv_camera.cpp
+    ${_THIRD_PARTY_SOURCES}
+    ${_STB_IMPL}
+)
+
+add_library(VulkanVisualizer::vulkan_visualizer ALIAS vulkan_visualizer)
+
+# ============================================================================
+# Target Configuration
+# ============================================================================
+# Public interface
+target_include_directories(vulkan_visualizer PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+
+target_compile_definitions(vulkan_visualizer PUBLIC
+    $<$<BOOL:${VV_WITH_LOGGING}>:VV_ENABLE_LOGGING>
+    $<$<BOOL:${VV_WITH_GPU_TIMESTAMPS}>:VV_ENABLE_GPU_TIMESTAMPS>
+    $<$<BOOL:${VV_WITH_TONEMAP}>:VV_ENABLE_TONEMAP>
+    $<$<BOOL:${VV_WITH_SCREENSHOT}>:VV_ENABLE_SCREENSHOT>
+    $<$<BOOL:${VV_WITH_HOTRELOAD}>:VV_ENABLE_HOTRELOAD>
+)
+
+target_link_libraries(vulkan_visualizer PUBLIC Vulkan::Vulkan)
+
+# Private implementation
+target_include_directories(vulkan_visualizer PRIVATE
+    ${imgui_src_SOURCE_DIR}
+    ${imgui_src_SOURCE_DIR}/backends
+    ${vk_bootstrap_SOURCE_DIR}/src
+    ${sdl3_SOURCE_DIR}/include
+    ${vma_src_SOURCE_DIR}/include
+    ${stb_SOURCE_DIR}
+)
+
+# Link SDL3 (wrapped to avoid export)
+if(TARGET SDL3-shared)
+    target_link_libraries(vulkan_visualizer PRIVATE $<BUILD_INTERFACE:SDL3-shared>)
+elseif(TARGET SDL3::SDL3)
+    target_link_libraries(vulkan_visualizer PRIVATE $<BUILD_INTERFACE:SDL3::SDL3>)
+endif()
+
+# Compiler optimizations
+if(MSVC)
+    target_compile_options(vulkan_visualizer PRIVATE
+        $<$<CONFIG:Release>:/O2 /Ot /Oi /GL /fp:fast>
+    )
+else()
+    target_compile_options(vulkan_visualizer PRIVATE
+        $<$<CONFIG:Release>:-O3 -ffast-math -fomit-frame-pointer>
+    )
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|X86_64|AMD64")
+        target_compile_options(vulkan_visualizer PRIVATE
+            $<$<CONFIG:Release>:-march=native>
+        )
+    endif()
+endif()
+
+# ============================================================================
+# Installation
+# ============================================================================
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+install(TARGETS vulkan_visualizer
+    EXPORT VulkanVisualizerTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(DIRECTORY include/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+)
+
+set(_config_dir ${CMAKE_INSTALL_LIBDIR}/cmake/VulkanVisualizer)
+
+install(EXPORT VulkanVisualizerTargets
+    FILE VulkanVisualizerTargets.cmake
+    NAMESPACE VulkanVisualizer::
+    DESTINATION ${_config_dir}
+)
+
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/VulkanVisualizerConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+configure_package_config_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/VulkanVisualizerConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/VulkanVisualizerConfig.cmake
+    INSTALL_DESTINATION ${_config_dir}
+)
+
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/VulkanVisualizerConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/VulkanVisualizerConfigVersion.cmake
+    DESTINATION ${_config_dir}
+)
+
+export(EXPORT VulkanVisualizerTargets
+    FILE ${CMAKE_CURRENT_BINARY_DIR}/VulkanVisualizerTargets.cmake
+    NAMESPACE VulkanVisualizer::
+)

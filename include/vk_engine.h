@@ -1,7 +1,6 @@
 #ifndef VULKAN_VISUALIZER_VK_ENGINE_H
 #define VULKAN_VISUALIZER_VK_ENGINE_H
 
-#include <SDL3/SDL.h>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -11,6 +10,9 @@
 #include <string_view>
 #include <vector>
 #include <vulkan/vulkan.h>
+
+struct SDL_Window;
+union SDL_Event;
 
 namespace vv_ui {
     struct TabsHost {
