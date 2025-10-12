@@ -5,14 +5,13 @@ cmake_minimum_required(VERSION 3.26)
 # =========================================================
 project(
         VulkanVisualizer
-        VERSION 0.8.0
+        VERSION 0.9.0
         LANGUAGES CXX
 )
 
 # =========================================================
 # Options
 # =========================================================
-option(VULKAN_VISUALIZER_BUILD_EXAMPLE "Build the Vulkan visualizer example executable" OFF)
 option(VV_WITH_LOGGING "Enable engine logging system and ImGui log panel" ON)
 option(VV_WITH_GPU_TIMESTAMPS "Enable GPU timestamp queries for frame timing" ON)
 option(VV_WITH_TONEMAP "Enable engine tonemapping pass (fullscreen)" ON)
@@ -111,10 +110,3 @@ target_compile_options(${libname} PRIVATE
         $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:${MSVC_RELEASE_OPTIONS}>
         $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:${GCC_CLANG_RELEASE_OPTIONS}>
 )
-
-# =========================================================
-# Optional examples
-# =========================================================
-if (VULKAN_VISUALIZER_BUILD_EXAMPLE)
-    add_subdirectory(examples)
-endif ()

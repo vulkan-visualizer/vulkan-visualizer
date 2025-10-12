@@ -55,7 +55,7 @@ jobs:
 
       - name: Configure (${{ matrix.build_type }})
         run: |
-          cmake -S . -B build -G Ninja -DVULKAN_VISUALIZER_BUILD_EXAMPLE=ON -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
       - name: Build (${{ matrix.build_type }})
         run: |
