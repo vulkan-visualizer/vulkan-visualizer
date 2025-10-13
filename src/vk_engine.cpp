@@ -313,25 +313,15 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
             ImGuiWindowFlags_NoSavedSettings |
             ImGuiWindowFlags_NoFocusOnAppearing |
             ImGuiWindowFlags_NoNav |
-            ImGuiWindowFlags_NoDocking;  // Removed NoBackground flag
+            ImGuiWindowFlags_NoDocking;
 
         // Position at top-left corner with some padding
         ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f), ImGuiCond_Always);
-        ImGui::SetNextWindowBgAlpha(0.5f);  // More visible background
+        ImGui::SetNextWindowBgAlpha(0.85f);  // More visible background
 
         if (ImGui::Begin("##HotkeyHints", nullptr, window_flags)) {
-            // Draw a semi-transparent background rectangle
-            ImDrawList* draw_list = ImGui::GetWindowDrawList();
-            ImVec2 win_pos = ImGui::GetWindowPos();
-            ImVec2 win_size = ImGui::GetWindowSize();
-            draw_list->AddRectFilled(
-                win_pos,
-                ImVec2(win_pos.x + win_size.x, win_pos.y + win_size.y),
-                IM_COL32(20, 20, 20, 200)  // Dark background with alpha
-            );
-
             // Use smaller font size and muted color
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.8f, 1.0f));  // Brighter gray
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.9f, 0.9f, 1.0f));  // Brighter text
 
             ImGui::Text("Hotkeys:");
             ImGui::Separator();
