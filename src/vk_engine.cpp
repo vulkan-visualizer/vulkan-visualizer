@@ -57,6 +57,16 @@
 #endif
 struct VulkanEngine::UiSystem : vv_ui::TabsHost {
     using PanelFn = std::function<void()>;
+
+    struct TabInfo {
+        std::string name;
+        PanelFn fn;
+        bool is_open{false};
+        SDL_Keycode hotkey{SDLK_UNKNOWN};
+        SDL_Keymod hotkey_mod{SDL_KMOD_NONE};
+        std::string tab_id; // For ImGui focus control
+    };
+
     bool init(SDL_Window* window, VkInstance instance, VkPhysicalDevice physicalDevice, VkDevice device, VkQueue graphicsQueue, uint32_t graphicsQueueFamily, VkFormat swapchainFormat, uint32_t swapchainImageCount) {
         std::array<VkDescriptorPoolSize, 11> pool_sizes{{
             {VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
@@ -143,10 +153,38 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
         }
         initialized_ = false;
     }
-    void process_event(const SDL_Event* e) const {
+
+    void process_event(const SDL_Event* e) {
         if (!initialized_ || !e) return;
+
+        // Handle hotkeys before ImGui processes the event
+        if (e->type == SDL_EVENT_KEY_DOWN) {
+            SDL_Keymod mods = static_cast<SDL_Keymod>(e->key.mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT | SDL_KMOD_ALT));
+            SDL_Keycode key = e->key.key;
+
+            // Check persistent tabs hotkeys
+            for (auto& tab : persistent_tabs_) {
+                if (tab.hotkey != SDLK_UNKNOWN && tab.hotkey == key) {
+                    bool mod_match = (tab.hotkey_mod == SDL_KMOD_NONE && mods == SDL_KMOD_NONE) ||
+                                    (tab.hotkey_mod != SDL_KMOD_NONE && (mods & tab.hotkey_mod) != 0);
+                    if (mod_match) {
+                        toggle_tab(tab);
+                        return; // Don't pass to ImGui
+                    }
+                }
+            }
+        }
+
         ImGui_ImplSDL3_ProcessEvent(e);
     }
+
+    void toggle_tab(TabInfo& tab) {
+        tab.is_open = !tab.is_open;
+        if (tab.is_open) {
+            pending_focus_tab_ = tab.tab_id;
+        }
+    }
+
     void new_frame() const {
         if (!initialized_) return;
         ImGui_ImplVulkan_NewFrame();
@@ -168,27 +206,71 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
         if (!initialized_) return;
         ImGui_ImplVulkan_SetMinImageCount(count);
     }
-    void add_persistent_tab(const char* name, PanelFn fn) {
+
+    void add_persistent_tab(const char* name, PanelFn fn, SDL_Keycode hotkey = SDLK_UNKNOWN, SDL_Keymod mod = SDL_KMOD_NONE) {
         if (!name || !*name || !fn) return;
-        persistent_tabs_.emplace_back(std::string(name), std::move(fn));
+        TabInfo tab;
+        tab.name = name;
+        tab.fn = std::move(fn);
+        tab.is_open = false; // Default closed
+        tab.hotkey = hotkey;
+        tab.hotkey_mod = mod;
+        tab.tab_id = std::string("##Tab_") + name;
+        persistent_tabs_.push_back(std::move(tab));
     }
+
     void draw_tabs_ui() {
         if (!initialized_) return;
+
+        // Count open tabs
+        size_t open_count = 0;
+        for (const auto& tab : persistent_tabs_) {
+            if (tab.is_open) open_count++;
+        }
+        for (const auto& [name, fn] : frame_tabs_) {
+            open_count++;
+        }
+
+        // Hide window if no tabs are open
+        if (open_count == 0) {
+            return;
+        }
+
         const ImGuiWindowFlags win_flags = ImGuiWindowFlags_NoDocking;
         if (ImGui::Begin(main_title_.c_str(), nullptr, win_flags)) {
             if (ImGui::BeginTabBar("MainTabs", ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_TabListPopupButton | ImGuiTabBarFlags_FittingPolicyScroll)) {
-                for (auto& [name, fn] : persistent_tabs_) {
-                    if (ImGui::BeginTabItem(name.c_str())) {
-                        fn();
+                // Render persistent tabs (only if open)
+                for (auto& tab : persistent_tabs_) {
+                    if (!tab.is_open) continue;
+
+                    bool tab_open = true;
+                    ImGuiTabItemFlags flags = ImGuiTabItemFlags_None;
+
+                    // Focus this tab if requested
+                    if (!pending_focus_tab_.empty() && pending_focus_tab_ == tab.tab_id) {
+                        flags |= ImGuiTabItemFlags_SetSelected;
+                        pending_focus_tab_.clear();
+                    }
+
+                    if (ImGui::BeginTabItem((tab.name + tab.tab_id).c_str(), &tab_open, flags)) {
+                        tab.fn();
                         ImGui::EndTabItem();
                     }
+
+                    // Handle manual close via 'X' button
+                    if (!tab_open) {
+                        tab.is_open = false;
+                    }
                 }
+
+                // Render frame tabs (always open when added)
                 for (auto& [name, fn] : frame_tabs_) {
                     if (ImGui::BeginTabItem(name.c_str())) {
                         fn();
                         ImGui::EndTabItem();
                     }
                 }
+
                 ImGui::EndTabBar();
             }
         }
@@ -293,9 +375,10 @@ private:
     bool initialized_{false};
     VkFormat color_format_{};
     std::string main_title_{"Vulkan Visualizer"};
-    std::vector<std::pair<std::string, PanelFn>> persistent_tabs_{};
+    std::vector<TabInfo> persistent_tabs_{};
     std::vector<std::pair<std::string, PanelFn>> frame_tabs_{};
     std::vector<PanelFn> frame_overlays_{};
+    std::string pending_focus_tab_; // Tab ID to focus on next frame
 };
 void DescriptorAllocator::init_pool(VkDevice device, uint32_t maxSets, std::span<const PoolSizeRatio> ratios) {
     maxSets = std::max(1u, maxSets);
