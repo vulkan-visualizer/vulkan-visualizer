@@ -301,7 +301,7 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
         if (!initialized_) return;
         if (persistent_tabs_.empty()) return;  // No tabs to show
 
-        // Setup window style for subtle overlay
+        // Debug: Always try to draw something
         ImGuiWindowFlags window_flags =
             ImGuiWindowFlags_NoTitleBar |
             ImGuiWindowFlags_NoResize |
@@ -317,50 +317,58 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
 
         // Position at top-left corner with some padding
         ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f), ImGuiCond_Always);
-        ImGui::SetNextWindowBgAlpha(0.85f);  // More visible background
+        ImGui::SetNextWindowBgAlpha(0.85f);
 
         if (ImGui::Begin("##HotkeyHints", nullptr, window_flags)) {
-            // Use smaller font size and muted color
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.9f, 0.9f, 1.0f));  // Brighter text
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.9f, 0.9f, 1.0f));
 
             ImGui::Text("Hotkeys:");
             ImGui::Separator();
 
-            // Display hotkeys for persistent tabs
-            for (const auto& tab : persistent_tabs_) {
-                if (tab.hotkey == SDLK_UNKNOWN) continue;
+            // Debug info
+            ImGui::Text("Debug: initialized=%d, tabs=%zu", initialized_ ? 1 : 0, persistent_tabs_.size());
 
-                // Format hotkey string
-                std::string hotkey_str;
-                if (tab.hotkey_mod & SDL_KMOD_CTRL) hotkey_str += "Ctrl+";
-                if (tab.hotkey_mod & SDL_KMOD_SHIFT) hotkey_str += "Shift+";
-                if (tab.hotkey_mod & SDL_KMOD_ALT) hotkey_str += "Alt+";
+            if (!initialized_) {
+                ImGui::Text("ImGui not initialized!");
+            } else if (persistent_tabs_.empty()) {
+                ImGui::Text("No persistent tabs registered!");
+            } else {
+                // Display hotkeys for persistent tabs
+                for (const auto& tab : persistent_tabs_) {
+                    if (tab.hotkey == SDLK_UNKNOWN) continue;
 
-                // Get key name
-                if (tab.hotkey >= SDLK_1 && tab.hotkey <= SDLK_9) {
-                    hotkey_str += std::to_string(tab.hotkey - SDLK_1 + 1);
-                } else if (tab.hotkey == SDLK_0) {
-                    hotkey_str += "0";
-                } else if (tab.hotkey >= SDLK_A && tab.hotkey <= SDLK_Z) {
-                    hotkey_str += static_cast<char>('A' + (tab.hotkey - SDLK_A));
-                } else if (tab.hotkey >= SDLK_F1 && tab.hotkey <= SDLK_F12) {
-                    hotkey_str += "F" + std::to_string(tab.hotkey - SDLK_F1 + 1);
-                } else {
-                    const char* key_name = SDL_GetKeyName(tab.hotkey);
-                    if (key_name && *key_name) {
-                        hotkey_str += key_name;
+                    // Format hotkey string
+                    std::string hotkey_str;
+                    if (tab.hotkey_mod & SDL_KMOD_CTRL) hotkey_str += "Ctrl+";
+                    if (tab.hotkey_mod & SDL_KMOD_SHIFT) hotkey_str += "Shift+";
+                    if (tab.hotkey_mod & SDL_KMOD_ALT) hotkey_str += "Alt+";
+
+                    // Get key name
+                    if (tab.hotkey >= SDLK_1 && tab.hotkey <= SDLK_9) {
+                        hotkey_str += std::to_string(tab.hotkey - SDLK_1 + 1);
+                    } else if (tab.hotkey == SDLK_0) {
+                        hotkey_str += "0";
+                    } else if (tab.hotkey >= SDLK_A && tab.hotkey <= SDLK_Z) {
+                        hotkey_str += static_cast<char>('A' + (tab.hotkey - SDLK_A));
+                    } else if (tab.hotkey >= SDLK_F1 && tab.hotkey <= SDLK_F12) {
+                        hotkey_str += "F" + std::to_string(tab.hotkey - SDLK_F1 + 1);
                     } else {
-                        hotkey_str += "?";
+                        const char* key_name = SDL_GetKeyName(tab.hotkey);
+                        if (key_name && *key_name) {
+                            hotkey_str += key_name;
+                        } else {
+                            hotkey_str += "?";
+                        }
                     }
-                }
 
-                // Display with status indicator
-                if (tab.is_open) {
-                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 1.0f, 0.4f, 1.0f));  // Bright green when open
-                    ImGui::Text("[%s] %s", hotkey_str.c_str(), tab.name.c_str());
-                    ImGui::PopStyleColor();
-                } else {
-                    ImGui::Text(" %s  %s", hotkey_str.c_str(), tab.name.c_str());
+                    // Display with status indicator
+                    if (tab.is_open) {
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 1.0f, 0.4f, 1.0f));
+                        ImGui::Text("[%s] %s", hotkey_str.c_str(), tab.name.c_str());
+                        ImGui::PopStyleColor();
+                    } else {
+                        ImGui::Text(" %s  %s", hotkey_str.c_str(), tab.name.c_str());
+                    }
                 }
             }
 
