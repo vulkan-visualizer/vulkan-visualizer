@@ -298,7 +298,8 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
         ImGui::End();
     }
     void draw_hotkey_hints() {
-        if (!initialized_ || persistent_tabs_.empty()) return;
+        if (!initialized_) return;
+        if (persistent_tabs_.empty()) return;  // No tabs to show
 
         // Setup window style for subtle overlay
         ImGuiWindowFlags window_flags =
@@ -312,15 +313,25 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
             ImGuiWindowFlags_NoSavedSettings |
             ImGuiWindowFlags_NoFocusOnAppearing |
             ImGuiWindowFlags_NoNav |
-            ImGuiWindowFlags_NoDocking;
+            ImGuiWindowFlags_NoDocking;  // Removed NoBackground flag
 
         // Position at top-left corner with some padding
         ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f), ImGuiCond_Always);
-        ImGui::SetNextWindowBgAlpha(0.35f);  // Semi-transparent background
+        ImGui::SetNextWindowBgAlpha(0.5f);  // More visible background
 
         if (ImGui::Begin("##HotkeyHints", nullptr, window_flags)) {
+            // Draw a semi-transparent background rectangle
+            ImDrawList* draw_list = ImGui::GetWindowDrawList();
+            ImVec2 win_pos = ImGui::GetWindowPos();
+            ImVec2 win_size = ImGui::GetWindowSize();
+            draw_list->AddRectFilled(
+                win_pos,
+                ImVec2(win_pos.x + win_size.x, win_pos.y + win_size.y),
+                IM_COL32(20, 20, 20, 200)  // Dark background with alpha
+            );
+
             // Use smaller font size and muted color
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 0.9f));  // Light gray
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.8f, 1.0f));  // Brighter gray
 
             ImGui::Text("Hotkeys:");
             ImGui::Separator();
@@ -345,12 +356,17 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
                 } else if (tab.hotkey >= SDLK_F1 && tab.hotkey <= SDLK_F12) {
                     hotkey_str += "F" + std::to_string(tab.hotkey - SDLK_F1 + 1);
                 } else {
-                    hotkey_str += SDL_GetKeyName(tab.hotkey);
+                    const char* key_name = SDL_GetKeyName(tab.hotkey);
+                    if (key_name && *key_name) {
+                        hotkey_str += key_name;
+                    } else {
+                        hotkey_str += "?";
+                    }
                 }
 
                 // Display with status indicator
                 if (tab.is_open) {
-                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.9f, 0.5f, 0.9f));  // Green when open
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 1.0f, 0.4f, 1.0f));  // Bright green when open
                     ImGui::Text("[%s] %s", hotkey_str.c_str(), tab.name.c_str());
                     ImGui::PopStyleColor();
                 } else {
