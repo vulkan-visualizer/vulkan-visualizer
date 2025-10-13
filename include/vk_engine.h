@@ -17,7 +17,7 @@ union SDL_Event;
 namespace vv_ui {
     struct TabsHost {
         virtual ~TabsHost()                                              = default;
-        virtual void add_tab(const char* name, std::function<void()> fn) = 0;
+        virtual void add_tab(const char* name, std::function<void()> fn, int hotkey = 0, int mod = 0) = 0;
         virtual void set_main_window_title(const char* title)            = 0;
         virtual void add_overlay(std::function<void()> fn)               = 0;
     };

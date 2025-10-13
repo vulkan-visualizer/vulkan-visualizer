@@ -60,11 +60,15 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
 
     struct TabInfo {
         std::string name;
-        PanelFn fn;
+        PanelFn panel_fn;
         bool is_open{false};
         SDL_Keycode hotkey{SDLK_UNKNOWN};
         SDL_Keymod hotkey_mod{SDL_KMOD_NONE};
-        std::string tab_id; // For ImGui focus control
+        std::string tab_id;
+    };
+
+    struct OverlayInfo {
+        PanelFn render_fn;
     };
 
     bool init(SDL_Window* window, VkInstance instance, VkPhysicalDevice physicalDevice, VkDevice device, VkQueue graphicsQueue, uint32_t graphicsQueueFamily, VkFormat swapchainFormat, uint32_t swapchainImageCount) {
@@ -142,6 +146,7 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
         initialized_  = true;
         return true;
     }
+
     void shutdown(VkDevice device) {
         if (!initialized_) return;
         ImGui_ImplVulkan_Shutdown();
@@ -154,22 +159,27 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
         initialized_ = false;
     }
 
+    void toggle_tab(TabInfo& tab) {
+        tab.is_open = !tab.is_open;
+        if (tab.is_open) {
+            pending_focus_tab_ = tab.tab_id;
+        }
+    }
+
     void process_event(const SDL_Event* e) {
         if (!initialized_ || !e) return;
 
-        // Handle hotkeys before ImGui processes the event
         if (e->type == SDL_EVENT_KEY_DOWN) {
             SDL_Keymod mods = static_cast<SDL_Keymod>(e->key.mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT | SDL_KMOD_ALT));
             SDL_Keycode key = e->key.key;
 
-            // Check persistent tabs hotkeys
-            for (auto& tab : persistent_tabs_) {
+            for (auto& tab : tabs_) {
                 if (tab.hotkey != SDLK_UNKNOWN && tab.hotkey == key) {
                     bool mod_match = (tab.hotkey_mod == SDL_KMOD_NONE && mods == SDL_KMOD_NONE) ||
                                     (tab.hotkey_mod != SDL_KMOD_NONE && (mods & tab.hotkey_mod) != 0);
                     if (mod_match) {
                         toggle_tab(tab);
-                        return; // Don't pass to ImGui
+                        return;
                     }
                 }
             }
@@ -178,209 +188,143 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
         ImGui_ImplSDL3_ProcessEvent(e);
     }
 
-    void toggle_tab(TabInfo& tab) {
-        tab.is_open = !tab.is_open;
-        if (tab.is_open) {
-            pending_focus_tab_ = tab.tab_id;
-        }
-    }
-
     void new_frame() const {
         if (!initialized_) return;
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
     }
-    void add_tab(const char* name, std::function<void()> fn) override {
+
+    void add_tab(const char* name, std::function<void()> fn, int hotkey = 0, int mod = 0) override {
         if (!name || !*name || !fn) return;
-        frame_tabs_.emplace_back(std::string(name), std::move(fn));
+
+        if (hotkey != 0) {
+            register_tab(name, std::move(fn), static_cast<SDL_Keycode>(hotkey), static_cast<SDL_Keymod>(mod));
+        } else {
+            OverlayInfo overlay;
+            overlay.render_fn = [name, fn = std::move(fn)]() {
+                if (ImGui::Begin(name, nullptr, ImGuiWindowFlags_None)) {
+                    fn();
+                }
+                ImGui::End();
+            };
+            frame_overlays_.push_back(std::move(overlay));
+        }
     }
+
     void set_main_window_title(const char* title) override {
         if (title) main_title_ = title;
     }
+
     void add_overlay(std::function<void()> fn) override {
         if (!fn) return;
-        frame_overlays_.push_back(std::move(fn));
-    }
-    void set_min_image_count(uint32_t count) {
-        if (!initialized_) return;
-        ImGui_ImplVulkan_SetMinImageCount(count);
+        OverlayInfo overlay;
+        overlay.render_fn = std::move(fn);
+        frame_overlays_.push_back(std::move(overlay));
     }
 
-    void add_persistent_tab(const char* name, PanelFn fn, SDL_Keycode hotkey = SDLK_UNKNOWN, SDL_Keymod mod = SDL_KMOD_NONE) {
+    void register_tab(const char* name, PanelFn fn, SDL_Keycode hotkey = SDLK_UNKNOWN, SDL_Keymod mod = SDL_KMOD_NONE) {
         if (!name || !*name || !fn) return;
 
-        // Auto-assign hotkey if not specified
         if (hotkey == SDLK_UNKNOWN) {
-            // Check if we've exceeded the limit
             if (auto_hotkey_index_ >= 10) {
                 throw std::runtime_error(
-                    std::string("Too many persistent tabs without explicit hotkeys. Maximum is 10 (keys 1-9,0). Tab: ") + name
+                    std::string("Too many tabs without explicit hotkeys. Maximum is 10 (keys 1-9,0). Tab: ") + name
                 );
             }
-
-            // Assign hotkey: 1,2,3,4,5,6,7,8,9,0
-            if (auto_hotkey_index_ < 9) {
-                hotkey = static_cast<SDL_Keycode>(SDLK_1 + auto_hotkey_index_);
-            } else {
-                hotkey = SDLK_0;  // 10th tab gets '0'
-            }
-
-            mod = SDL_KMOD_NONE;  // Auto-assigned keys have no modifier
+            hotkey = (auto_hotkey_index_ < 9) ?
+                     static_cast<SDL_Keycode>(SDLK_1 + auto_hotkey_index_) :
+                     SDLK_0;
+            mod = SDL_KMOD_NONE;
             auto_hotkey_index_++;
         }
 
         TabInfo tab;
         tab.name = name;
-        tab.fn = std::move(fn);
-        tab.is_open = false; // Default closed
+        tab.panel_fn = std::move(fn);
+        tab.is_open = false;
         tab.hotkey = hotkey;
         tab.hotkey_mod = mod;
         tab.tab_id = std::string("##Tab_") + name;
-        persistent_tabs_.push_back(std::move(tab));
+        tabs_.push_back(std::move(tab));
     }
 
-    void draw_tabs_ui() {
+    void set_min_image_count(uint32_t count) {
+        if (!initialized_) return;
+        ImGui_ImplVulkan_SetMinImageCount(count);
+    }
+
+    void render_overlay(VkCommandBuffer cmd, VkImage swapchainImage, VkImageView swapchainView,
+                       VkExtent2D extent, VkImageLayout previousLayout) {
         if (!initialized_) return;
 
-        // Count open tabs
-        size_t open_count = 0;
-        for (const auto& tab : persistent_tabs_) {
-            if (tab.is_open) open_count++;
-        }
-        for (const auto& [name, fn] : frame_tabs_) {
-            open_count++;
+        draw_hotkey_hints();
+        draw_main_tabs_window();
+
+        for (auto& overlay : frame_overlays_) {
+            overlay.render_fn();
         }
 
-        // Hide window if no tabs are open
-        if (open_count == 0) {
-            return;
+        transition_to_color_attachment(cmd, swapchainImage, previousLayout);
+        begin_rendering(cmd, swapchainView, extent);
+        ImGui::Render();
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+        end_rendering(cmd);
+
+        ImGuiIO& io = ImGui::GetIO();
+        if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+            ImGui::UpdatePlatformWindows();
+            ImGui::RenderPlatformWindowsDefault();
         }
 
-        const ImGuiWindowFlags win_flags = ImGuiWindowFlags_NoDocking;
-        if (ImGui::Begin(main_title_.c_str(), nullptr, win_flags)) {
-            if (ImGui::BeginTabBar("MainTabs", ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_TabListPopupButton | ImGuiTabBarFlags_FittingPolicyScroll)) {
-                // Render persistent tabs (only if open)
-                for (auto& tab : persistent_tabs_) {
-                    if (!tab.is_open) continue;
+        transition_to_present(cmd, swapchainImage);
 
-                    bool tab_open = true;
-                    ImGuiTabItemFlags flags = ImGuiTabItemFlags_None;
-
-                    // Focus this tab if requested
-                    if (!pending_focus_tab_.empty() && pending_focus_tab_ == tab.tab_id) {
-                        flags |= ImGuiTabItemFlags_SetSelected;
-                        pending_focus_tab_.clear();
-                    }
-
-                    if (ImGui::BeginTabItem((tab.name + tab.tab_id).c_str(), &tab_open, flags)) {
-                        tab.fn();
-                        ImGui::EndTabItem();
-                    }
-
-                    // Handle manual close via 'X' button
-                    if (!tab_open) {
-                        tab.is_open = false;
-                    }
-                }
-
-                // Render frame tabs (always open when added)
-                for (auto& [name, fn] : frame_tabs_) {
-                    if (ImGui::BeginTabItem(name.c_str())) {
-                        fn();
-                        ImGui::EndTabItem();
-                    }
-                }
-
-                ImGui::EndTabBar();
-            }
-        }
-        ImGui::End();
+        frame_overlays_.clear();
     }
+
+private:
     void draw_hotkey_hints() {
-        if (!initialized_) return;
-        if (persistent_tabs_.empty()) return;  // No tabs to show
+        if (tabs_.empty()) return;
 
-        // Setup window style for subtle overlay - add NoNav to prevent docking
+        ImGuiViewport* viewport = ImGui::GetMainViewport();
+        ImVec2 work_pos = viewport->WorkPos;
+
         ImGuiWindowFlags window_flags =
-            ImGuiWindowFlags_NoTitleBar |
-            ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoDecoration |
             ImGuiWindowFlags_NoMove |
-            ImGuiWindowFlags_NoScrollbar |
-            ImGuiWindowFlags_NoScrollWithMouse |
-            ImGuiWindowFlags_NoCollapse |
-            ImGuiWindowFlags_AlwaysAutoResize |
             ImGuiWindowFlags_NoSavedSettings |
             ImGuiWindowFlags_NoFocusOnAppearing |
             ImGuiWindowFlags_NoNav |
             ImGuiWindowFlags_NoDocking |
-            ImGuiWindowFlags_NoBackground;  // Use no background flag to allow custom drawing
+            ImGuiWindowFlags_AlwaysAutoResize;
 
-        // Get the main viewport to position relative to the main window
-        ImGuiViewport* viewport = ImGui::GetMainViewport();
-
-        // Position at top-left corner of the main viewport with some padding
-        ImVec2 window_pos = ImVec2(viewport->Pos.x + 10.0f, viewport->Pos.y + 10.0f);
+        ImVec2 window_pos = ImVec2(work_pos.x + 10.0f, work_pos.y + 10.0f);
         ImGui::SetNextWindowPos(window_pos, ImGuiCond_Always);
         ImGui::SetNextWindowBgAlpha(0.85f);
-
-        // Force window to stay in main viewport
         ImGui::SetNextWindowViewport(viewport->ID);
 
         if (ImGui::Begin("##HotkeyHints", nullptr, window_flags)) {
-            // Draw semi-transparent background manually
-            ImDrawList* draw_list = ImGui::GetWindowDrawList();
-            ImVec2 win_pos = ImGui::GetWindowPos();
-            ImVec2 win_size = ImGui::GetWindowSize();
-
-            // Draw background BEFORE content (using background draw list)
-            draw_list->AddRectFilled(
-                win_pos,
-                ImVec2(win_pos.x + win_size.x, win_pos.y + win_size.y),
-                IM_COL32(20, 20, 20, 217),  // Dark background with 85% opacity
-                4.0f  // Rounded corners
-            );
-
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.9f, 0.9f, 1.0f));
-
-            ImGui::Text("Hotkeys:");
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.9f, 1.0f, 1.0f));
+            ImGui::TextUnformatted("Hotkeys:");
             ImGui::Separator();
 
-            // Display hotkeys for persistent tabs
-            for (const auto& tab : persistent_tabs_) {
+            for (const auto& tab : tabs_) {
                 if (tab.hotkey == SDLK_UNKNOWN) continue;
 
-                // Format hotkey string
-                std::string hotkey_str;
-                if (tab.hotkey_mod & SDL_KMOD_CTRL) hotkey_str += "Ctrl+";
-                if (tab.hotkey_mod & SDL_KMOD_SHIFT) hotkey_str += "Shift+";
-                if (tab.hotkey_mod & SDL_KMOD_ALT) hotkey_str += "Alt+";
+                const char* key_name = SDL_GetKeyName(tab.hotkey);
+                std::string mod_str;
+                if (tab.hotkey_mod & SDL_KMOD_CTRL) mod_str += "Ctrl+";
+                if (tab.hotkey_mod & SDL_KMOD_SHIFT) mod_str += "Shift+";
+                if (tab.hotkey_mod & SDL_KMOD_ALT) mod_str += "Alt+";
 
-                // Get key name
-                if (tab.hotkey >= SDLK_1 && tab.hotkey <= SDLK_9) {
-                    hotkey_str += std::to_string(tab.hotkey - SDLK_1 + 1);
-                } else if (tab.hotkey == SDLK_0) {
-                    hotkey_str += "0";
-                } else if (tab.hotkey >= SDLK_A && tab.hotkey <= SDLK_Z) {
-                    hotkey_str += static_cast<char>('A' + (tab.hotkey - SDLK_A));
-                } else if (tab.hotkey >= SDLK_F1 && tab.hotkey <= SDLK_F12) {
-                    hotkey_str += "F" + std::to_string(tab.hotkey - SDLK_F1 + 1);
-                } else {
-                    const char* key_name = SDL_GetKeyName(tab.hotkey);
-                    if (key_name && *key_name) {
-                        hotkey_str += key_name;
-                    } else {
-                        hotkey_str += "?";
-                    }
-                }
+                std::string hotkey_text = mod_str + key_name;
 
-                // Display with status indicator
                 if (tab.is_open) {
-                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 1.0f, 0.4f, 1.0f));  // Bright green when open
-                    ImGui::Text("[%s] %s", hotkey_str.c_str(), tab.name.c_str());
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 1.0f, 0.4f, 1.0f));
+                    ImGui::Text("[%s] %s", hotkey_text.c_str(), tab.name.c_str());
                     ImGui::PopStyleColor();
                 } else {
-                    ImGui::Text(" %s  %s", hotkey_str.c_str(), tab.name.c_str());
+                    ImGui::Text(" %s  %s", hotkey_text.c_str(), tab.name.c_str());
                 }
             }
 
@@ -389,117 +333,136 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
         ImGui::End();
     }
 
-    void render_overlay(VkCommandBuffer cmd, VkImage swapchainImage, VkImageView swapchainView, VkExtent2D extent, VkImageLayout previousLayout) {
-        if (!initialized_) return;
-
-        // Draw hotkey hints overlay FIRST (always visible, even when no tabs are open)
-        draw_hotkey_hints();
-
-        // Then draw the main tab UI
-        draw_tabs_ui();
-
-        // Then draw other overlays
-        for (auto& fn : frame_overlays_) {
-            fn();
+    void draw_main_tabs_window() {
+        size_t open_count = 0;
+        for (const auto& tab : tabs_) {
+            if (tab.is_open) open_count++;
         }
-        VkImageMemoryBarrier2 to_color{
+
+        if (open_count == 0) return;
+
+        ImGuiViewport* viewport = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(viewport->WorkPos);
+        ImGui::SetNextWindowSize(viewport->WorkSize);
+        ImGui::SetNextWindowViewport(viewport->ID);
+
+        ImGuiWindowFlags window_flags =
+            ImGuiWindowFlags_MenuBar |
+            ImGuiWindowFlags_NoDocking |
+            ImGuiWindowFlags_NoTitleBar |
+            ImGuiWindowFlags_NoCollapse |
+            ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_NoBringToFrontOnFocus |
+            ImGuiWindowFlags_NoNavFocus |
+            ImGuiWindowFlags_NoBackground;
+
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+
+        if (ImGui::Begin("DockSpaceWindow", nullptr, window_flags)) {
+            ImGui::PopStyleVar(3);
+
+            ImGuiID dockspace_id = ImGui::GetID("MainDockSpace");
+            ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
+
+            for (auto& tab : tabs_) {
+                if (!tab.is_open) continue;
+
+                bool is_open = tab.is_open;
+                if (ImGui::Begin(tab.name.c_str(), &is_open, ImGuiWindowFlags_None)) {
+                    if (!pending_focus_tab_.empty() && pending_focus_tab_ == tab.tab_id) {
+                        ImGui::SetWindowFocus();
+                        pending_focus_tab_.clear();
+                    }
+
+                    tab.panel_fn();
+                }
+                ImGui::End();
+
+                if (!is_open) {
+                    tab.is_open = false;
+                }
+            }
+        } else {
+            ImGui::PopStyleVar(3);
+        }
+        ImGui::End();
+    }
+
+    void transition_to_color_attachment(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) {
+        VkImageMemoryBarrier2 barrier{
             .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
             .pNext            = nullptr,
             .srcStageMask     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
             .srcAccessMask    = VK_ACCESS_2_MEMORY_WRITE_BIT,
             .dstStageMask     = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
             .dstAccessMask    = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
-            .oldLayout        = previousLayout,
+            .oldLayout        = oldLayout,
             .newLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .image            = swapchainImage,
+            .image            = image,
             .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u},
         };
-        VkDependencyInfo dep_color{
+        VkDependencyInfo dep{
             .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .pNext                    = nullptr,
-            .dependencyFlags          = 0u,
-            .memoryBarrierCount       = 0u,
-            .pMemoryBarriers          = nullptr,
-            .bufferMemoryBarrierCount = 0u,
-            .pBufferMemoryBarriers    = nullptr,
             .imageMemoryBarrierCount  = 1u,
-            .pImageMemoryBarriers     = &to_color,
+            .pImageMemoryBarriers     = &barrier,
         };
-        vkCmdPipelineBarrier2(cmd, &dep_color);
+        vkCmdPipelineBarrier2(cmd, &dep);
+    }
+
+    void begin_rendering(VkCommandBuffer cmd, VkImageView view, VkExtent2D extent) {
         VkRenderingAttachmentInfo color_attachment{
-            .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .pNext              = nullptr,
-            .imageView          = swapchainView,
-            .imageLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .resolveMode        = VK_RESOLVE_MODE_NONE,
-            .resolveImageView   = VK_NULL_HANDLE,
-            .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .loadOp             = VK_ATTACHMENT_LOAD_OP_LOAD,
-            .storeOp            = VK_ATTACHMENT_STORE_OP_STORE,
-            .clearValue         = {},
+            .sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .imageView   = view,
+            .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .loadOp      = VK_ATTACHMENT_LOAD_OP_LOAD,
+            .storeOp     = VK_ATTACHMENT_STORE_OP_STORE,
         };
         VkRenderingInfo rendering_info{
             .sType                = VK_STRUCTURE_TYPE_RENDERING_INFO,
-            .pNext                = nullptr,
-            .flags                = 0u,
             .renderArea           = {{0, 0}, extent},
             .layerCount           = 1u,
-            .viewMask             = 0u,
             .colorAttachmentCount = 1u,
             .pColorAttachments    = &color_attachment,
-            .pDepthAttachment     = nullptr,
-            .pStencilAttachment   = nullptr,
         };
         vkCmdBeginRendering(cmd, &rendering_info);
-        ImGui::Render();
-        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+    }
+
+    void end_rendering(VkCommandBuffer cmd) {
         vkCmdEndRendering(cmd);
-        ImGuiIO& io = ImGui::GetIO();
-        if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-            ImGui::UpdatePlatformWindows();
-            ImGui::RenderPlatformWindowsDefault();
-        }
-        VkImageMemoryBarrier2 to_present{
+    }
+
+    void transition_to_present(VkCommandBuffer cmd, VkImage image) {
+        VkImageMemoryBarrier2 barrier{
             .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .pNext            = nullptr,
             .srcStageMask     = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
             .srcAccessMask    = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
             .dstStageMask     = VK_PIPELINE_STAGE_2_NONE,
             .dstAccessMask    = 0u,
             .oldLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             .newLayout        = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            .image            = swapchainImage,
+            .image            = image,
             .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u},
         };
-        VkDependencyInfo dep_present{
+        VkDependencyInfo dep{
             .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .pNext                    = nullptr,
-            .dependencyFlags          = 0u,
-            .memoryBarrierCount       = 0u,
-            .pMemoryBarriers          = nullptr,
-            .bufferMemoryBarrierCount = 0u,
-            .pBufferMemoryBarriers    = nullptr,
             .imageMemoryBarrierCount  = 1u,
-            .pImageMemoryBarriers     = &to_present,
+            .pImageMemoryBarriers     = &barrier,
         };
-        vkCmdPipelineBarrier2(cmd, &dep_present);
-        frame_tabs_.clear();
-        frame_overlays_.clear();
-    }
-    void add_panel(PanelFn fn) {
-        add_persistent_tab("Panel", std::move(fn));
+        vkCmdPipelineBarrier2(cmd, &dep);
     }
 
-private:
     VkDescriptorPool pool_{VK_NULL_HANDLE};
     bool initialized_{false};
     VkFormat color_format_{};
     std::string main_title_{"Vulkan Visualizer"};
-    std::vector<TabInfo> persistent_tabs_{};
-    std::vector<std::pair<std::string, PanelFn>> frame_tabs_{};
-    std::vector<PanelFn> frame_overlays_{};
-    std::string pending_focus_tab_; // Tab ID to focus on next frame
-    int auto_hotkey_index_{0};      // Auto-assign hotkeys: 0-9 for keys 1-9,0
+
+    std::vector<TabInfo> tabs_;
+    std::vector<OverlayInfo> frame_overlays_;
+    std::string pending_focus_tab_;
+    int auto_hotkey_index_{0};
 };
 void DescriptorAllocator::init_pool(VkDevice device, uint32_t maxSets, std::span<const PoolSizeRatio> ratios) {
     maxSets = std::max(1u, maxSets);
@@ -1238,7 +1201,7 @@ void VulkanEngine::create_imgui() {
     vkGetPhysicalDeviceProperties(ctx_.physical, &props);
     VkPhysicalDeviceMemoryProperties memProps{};
     vkGetPhysicalDeviceMemoryProperties(ctx_.physical, &memProps);
-    ui_->add_persistent_tab("Stats", [this, props, memProps] {
+    ui_->register_tab("Stats", [this, props, memProps] {
         const ImGuiIO& io = ImGui::GetIO();
         const float fps   = io.Framerate;
         const float ms    = fps > 0.f ? 1000.f / fps : 0.f;
@@ -1312,7 +1275,7 @@ void VulkanEngine::create_imgui() {
         ImGui::Text("Usage:  %.1f MB / %.1f MB", fmtMB(totalUsage), fmtMB(totalBudget));
     });
 #ifdef VV_ENABLE_SCREENSHOT
-    ui_->add_persistent_tab("Controls", [this] {
+    ui_->register_tab("Controls", [this] {
 #ifdef VV_ENABLE_TONEMAP
         ImGui::Checkbox("Use sRGB Swapchain (Gamma)", &tonemap_enabled_);
         ImGui::SameLine();
@@ -1327,7 +1290,7 @@ void VulkanEngine::create_imgui() {
     });
 #endif
 #ifdef VV_ENABLE_LOGGING
-    ui_->add_persistent_tab("Log", [this] {
+    ui_->register_tab("Log", [this] {
         for (const auto& line : log_lines_) ImGui::TextUnformatted(line.c_str());
     });
     log_line("Engine initialized");
