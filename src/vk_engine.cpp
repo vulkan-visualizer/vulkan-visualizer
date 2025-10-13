@@ -252,9 +252,6 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
             open_count++;
         }
 
-        // Draw hotkey hints overlay (always visible, like Blender/Houdini)
-        draw_hotkey_hints();
-
         // Hide window if no tabs are open
         if (open_count == 0) {
             return;
@@ -368,7 +365,14 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
 
     void render_overlay(VkCommandBuffer cmd, VkImage swapchainImage, VkImageView swapchainView, VkExtent2D extent, VkImageLayout previousLayout) {
         if (!initialized_) return;
+
+        // Draw hotkey hints overlay FIRST (always visible, even when no tabs are open)
+        draw_hotkey_hints();
+
+        // Then draw the main tab UI
         draw_tabs_ui();
+
+        // Then draw other overlays
         for (auto& fn : frame_overlays_) {
             fn();
         }
