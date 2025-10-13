@@ -209,6 +209,27 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
 
     void add_persistent_tab(const char* name, PanelFn fn, SDL_Keycode hotkey = SDLK_UNKNOWN, SDL_Keymod mod = SDL_KMOD_NONE) {
         if (!name || !*name || !fn) return;
+
+        // Auto-assign hotkey if not specified
+        if (hotkey == SDLK_UNKNOWN) {
+            // Check if we've exceeded the limit
+            if (auto_hotkey_index_ >= 10) {
+                throw std::runtime_error(
+                    std::string("Too many persistent tabs without explicit hotkeys. Maximum is 10 (keys 1-9,0). Tab: ") + name
+                );
+            }
+
+            // Assign hotkey: 1,2,3,4,5,6,7,8,9,0
+            if (auto_hotkey_index_ < 9) {
+                hotkey = static_cast<SDL_Keycode>(SDLK_1 + auto_hotkey_index_);
+            } else {
+                hotkey = SDLK_0;  // 10th tab gets '0'
+            }
+
+            mod = SDL_KMOD_NONE;  // Auto-assigned keys have no modifier
+            auto_hotkey_index_++;
+        }
+
         TabInfo tab;
         tab.name = name;
         tab.fn = std::move(fn);
@@ -379,6 +400,7 @@ private:
     std::vector<std::pair<std::string, PanelFn>> frame_tabs_{};
     std::vector<PanelFn> frame_overlays_{};
     std::string pending_focus_tab_; // Tab ID to focus on next frame
+    int auto_hotkey_index_{0};      // Auto-assign hotkeys: 0-9 for keys 1-9,0
 };
 void DescriptorAllocator::init_pool(VkDevice device, uint32_t maxSets, std::span<const PoolSizeRatio> ratios) {
     maxSets = std::max(1u, maxSets);
