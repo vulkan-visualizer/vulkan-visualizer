@@ -192,7 +192,6 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
     void new_frame() {
         if (!initialized_) return;
 
-        // Clear tabs from previous frame before starting new frame
         std::unordered_map<std::string, bool> open_states;
         for (const auto& tab : tabs_) {
             open_states[tab.name] = tab.is_open;
@@ -204,14 +203,6 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
-    }
-
-    void begin_frame() {
-        // Legacy function, logic moved to new_frame
-    }
-
-    void clear_tabs_for_new_frame() {
-        // Legacy function, logic moved to new_frame
     }
 
     void add_tab(const char* name, std::function<void()> fn, int hotkey = 0, int mod = 0) override {
@@ -253,7 +244,6 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
         TabInfo tab;
         tab.name = name;
         tab.panel_fn = std::move(fn);
-        // Restore previous open state if it exists
         auto it = prev_open_states_.find(name);
         tab.is_open = (it != prev_open_states_.end()) ? it->second : false;
         tab.hotkey = hotkey;
@@ -271,8 +261,6 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
                        VkExtent2D extent, VkImageLayout previousLayout) {
         if (!initialized_) return;
 
-        // Clear tabs from previous frame before rendering
-        clear_tabs_for_new_frame();
 
         draw_hotkey_hints();
         draw_main_tabs_window();
