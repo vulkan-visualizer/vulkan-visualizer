@@ -198,18 +198,10 @@ struct VulkanEngine::UiSystem : vv_ui::TabsHost {
     void add_tab(const char* name, std::function<void()> fn, int hotkey = 0, int mod = 0) override {
         if (!name || !*name || !fn) return;
 
-        if (hotkey != 0) {
-            register_tab(name, std::move(fn), static_cast<SDL_Keycode>(hotkey), static_cast<SDL_Keymod>(mod));
-        } else {
-            OverlayInfo overlay;
-            overlay.render_fn = [name, fn = std::move(fn)]() {
-                if (ImGui::Begin(name, nullptr, ImGuiWindowFlags_None)) {
-                    fn();
-                }
-                ImGui::End();
-            };
-            frame_overlays_.push_back(std::move(overlay));
-        }
+        SDL_Keycode sdl_key = (hotkey == 0) ? SDLK_UNKNOWN : static_cast<SDL_Keycode>(hotkey);
+        SDL_Keymod sdl_mod = static_cast<SDL_Keymod>(mod);
+
+        register_tab(name, std::move(fn), sdl_key, sdl_mod);
     }
 
     void set_main_window_title(const char* title) override {
