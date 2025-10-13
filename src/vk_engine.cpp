@@ -676,6 +676,7 @@ void VulkanEngine::run() {
 #endif
         if (ui_) {
             ui_->new_frame();
+            register_default_tabs();
             if (renderer_) {
                 renderer_->on_imgui(eng, frm);
             }
@@ -1202,6 +1203,11 @@ void VulkanEngine::create_imgui() {
     style.WindowBorderSize = 0.0f;
     style.FrameRounding    = 4.0f;
     style.GrabRounding     = 4.0f;
+}
+
+void VulkanEngine::register_default_tabs() {
+    if (!ui_) return;
+
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(ctx_.physical, &props);
     VkPhysicalDeviceMemoryProperties memProps{};
@@ -1298,9 +1304,9 @@ void VulkanEngine::create_imgui() {
     ui_->register_tab("Log", [this] {
         for (const auto& line : log_lines_) ImGui::TextUnformatted(line.c_str());
     });
-    log_line("Engine initialized");
 #endif
 }
+
 void VulkanEngine::destroy_imgui() {
     if (ui_) {
         ui_->shutdown(ctx_.device);

@@ -281,6 +281,7 @@ private:
     struct UiSystem;
     void create_imgui();
     void destroy_imgui();
+    void register_default_tabs();
     std::unique_ptr<UiSystem> ui_;
     VkFormat imgui_format_{VK_FORMAT_UNDEFINED};
 #ifdef VV_ENABLE_LOGGING
