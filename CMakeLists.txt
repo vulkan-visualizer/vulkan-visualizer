@@ -239,8 +239,26 @@ install(FILES
 
 # stb headers
 install(FILES
-    ${stb_SOURCE_DIR}/stb_image_write.h
+    ${stb_SOURCE_DIR}/stb_connected_components.h
+    ${stb_SOURCE_DIR}/stb_c_lexer.h
+    ${stb_SOURCE_DIR}/stb_divide.h
+    ${stb_SOURCE_DIR}/stb_ds.h
+    ${stb_SOURCE_DIR}/stb_dxt.h
+    ${stb_SOURCE_DIR}/stb_easy_font.h
+    ${stb_SOURCE_DIR}/stb_herringbone_wang_tile.h
+    ${stb_SOURCE_DIR}/stb_hexwave.h
     ${stb_SOURCE_DIR}/stb_image.h
+    ${stb_SOURCE_DIR}/stb_image_resize2.h
+    ${stb_SOURCE_DIR}/stb_image_write.h
+    ${stb_SOURCE_DIR}/stb_include.h
+    ${stb_SOURCE_DIR}/stb_leakcheck.h
+    ${stb_SOURCE_DIR}/stb_perlin.h
+    ${stb_SOURCE_DIR}/stb_rect_pack.h
+    ${stb_SOURCE_DIR}/stb_sprintf.h
+    ${stb_SOURCE_DIR}/stb_textedit.h
+    ${stb_SOURCE_DIR}/stb_tilemap_editor.h
+    ${stb_SOURCE_DIR}/stb_truetype.h
+    ${stb_SOURCE_DIR}/stb_voxel_render.h
     DESTINATION ${_third_party_install_dir}/stb
 )
 
