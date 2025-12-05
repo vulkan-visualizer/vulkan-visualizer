@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 4.0)
+cmake_minimum_required(VERSION 3.28)
 project(vulkan_visualizer VERSION 1.1.0 LANGUAGES CXX)
 
 # ============================================================================
