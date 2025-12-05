@@ -53,23 +53,17 @@ jobs:
         run: |
           cmake -S . -B build -G "Ninja Multi-Config" `
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON `
-            -DCMAKE_INSTALL_PREFIX=install
 
       - name: Build (${{ matrix.build_type }})
         shell: powershell
         run: |
           cmake --build build --config ${{ matrix.build_type }} --parallel
 
-      - name: Install to staging directory (${{ matrix.build_type }})
-        shell: powershell
-        run: |
-          cmake --install build --config ${{ matrix.build_type }} --prefix install
-
       - name: Package portable release (${{ matrix.build_type }})
         if: success()
         shell: powershell
         run: |
-          Compress-Archive -Path install\* -DestinationPath vulkan-visualizer-windows-x64-${{ matrix.build_type }}.zip
+          Compress-Archive -Path "build/${{ matrix.build_type }}/*" -DestinationPath "vulkan-visualizer-windows-x64-${{ matrix.build_type }}.zip"
 
       - name: Upload build artifacts (${{ matrix.build_type }})
         uses: actions/upload-artifact@v4
