@@ -140,7 +140,7 @@ namespace vk::engine {
             context::FrameData& frData   = frames_[state_.frame_number % context::FRAME_OVERLAP];
             frData.asyncComputeSubmitted = false;
             renderer.record_graphics(cmd, ctx_, frm);
-            renderer.record_imgui();
+            ui_system.record_imgui();
             switch (renderer_caps_.presentation_mode) {
             case context::PresentationMode::EngineBlit:
                 {
