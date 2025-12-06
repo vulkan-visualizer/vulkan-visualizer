@@ -86,7 +86,7 @@ target_sources(vk_vis
         module/vk.engine.ixx
         module/vk.context.ixx
 )
-target_link_libraries(vk_vis PUBLIC Vulkan::Vulkan)
+target_link_libraries(vk_vis PUBLIC Vulkan::Vulkan shaderc_shared)
 if (TARGET SDL3-shared)
     target_link_libraries(vk_vis PUBLIC $<BUILD_INTERFACE:SDL3-shared>)
 elseif (TARGET SDL3::SDL3)

@@ -4,6 +4,8 @@ module;
 #include <functional>
 #include <ranges>
 #include <string>
+
+#include <shaderc/shaderc.hpp>
 export module vk.engine;
 import vk.context;
 
@@ -31,6 +33,8 @@ namespace vk::engine {
         void init(CRenderer auto& renderer, CUiSystem auto& ui_system);
         void run(CRenderer auto& renderer, CUiSystem auto& ui_system);
         void cleanup();
+
+        static VkShaderModule compile_glsl_to_vk_shader_module(VkDevice device, shaderc_shader_kind stage, std::string_view glsl_source, std::string_view debug_name = {});
 
         VulkanEngine()                                   = default;
         ~VulkanEngine()                                  = default;
@@ -73,7 +77,7 @@ namespace vk::engine {
         context::EngineContext ctx_{};
         context::RendererCaps renderer_caps_{};
         context::SwapchainSystem swapchain_{};
-        std::vector<context::AttachmentView> frame_attachment_views_;
+        std::vector<context::AttachmentView> frame_attachment_views_{};
         context::AttachmentView depth_attachment_view_{};
         context::FrameData frames_[context::FRAME_OVERLAP]{};
 
