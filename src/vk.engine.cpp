@@ -24,23 +24,6 @@ module vk.engine;
 #endif
 // clang-format on
 
-VkShaderModule vk::engine::VulkanEngine::compile_glsl_to_vk_shader_module(const VkDevice device, const shaderc_shader_kind stage, const std::string_view glsl_source, const std::string_view debug_name) {
-    const shaderc::Compiler compiler;
-    shaderc::CompileOptions options;
-
-    options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
-    options.SetOptimizationLevel(shaderc_optimization_level_performance);
-
-    const auto result = compiler.CompileGlslToSpv(glsl_source.data(), glsl_source.size(), stage, debug_name.empty() ? nullptr : debug_name.data(), options);
-    if (result.GetCompilationStatus() != shaderc_compilation_status_success) throw std::runtime_error(result.GetErrorMessage());
-
-    const std::vector spirv(result.cbegin(), result.cend());
-    const VkShaderModuleCreateInfo ci{.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = spirv.size() * sizeof(std::uint32_t), .pCode = spirv.data()};
-    VkShaderModule module{};
-    VK_CHECK(vkCreateShaderModule(device, &ci, nullptr, &module));
-
-    return module;
-}
 void vk::engine::VulkanEngine::process_capacity() {
     auto ensure_ext = [&](const char* name) {
         if (std::ranges::find(renderer_caps_.extra_device_extensions, name) == renderer_caps_.extra_device_extensions.end()) renderer_caps_.extra_device_extensions.push_back(name);

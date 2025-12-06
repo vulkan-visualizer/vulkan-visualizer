@@ -34,8 +34,6 @@ namespace vk::engine {
         void run(CRenderer auto& renderer, CUiSystem auto& ui_system);
         void cleanup();
 
-        static VkShaderModule compile_glsl_to_vk_shader_module(VkDevice device, shaderc_shader_kind stage, std::string_view glsl_source, std::string_view debug_name = {});
-
         VulkanEngine()                                   = default;
         ~VulkanEngine()                                  = default;
         VulkanEngine(const VulkanEngine&)                = delete;
