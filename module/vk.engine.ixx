@@ -11,7 +11,7 @@ import vk.context;
 
 namespace vk::engine {
     export template <typename T>
-    concept CRenderer = requires(T r, context::EngineContext& eng, context::FrameContext& frm, context::RendererCaps& caps, VkCommandBuffer cmd) {
+    concept CRenderer = requires(T r, context::EngineContext& eng, context::FrameContext& frm, context::RendererCaps& caps, VkCommandBuffer &cmd) {
         { r.query_required_device_caps(caps) };
         { r.get_capabilities(caps) };
         { r.initialize(eng, caps, frm) };
@@ -20,12 +20,12 @@ namespace vk::engine {
     };
 
     export template <typename T>
-    concept CUiSystem = requires(T r, const char* title, context::EngineContext& eng, context::FrameContext& frm, const SDL_Event& event, VkFormat format, uint32_t n_swapchain_image) {
+    concept CUiSystem = requires(T r, const char* title, context::EngineContext& eng, context::FrameContext& frm, VkCommandBuffer &cmd, const SDL_Event& event, VkFormat format, uint32_t n_swapchain_image) {
         { r.set_main_window_title(title) };
         { r.create_imgui(eng, format, n_swapchain_image) };
         { r.destroy_imgui(eng) };
         { r.process_event(event) };
-        { r.record_imgui(frm) };
+        { r.record_imgui(cmd, frm) };
     };
 
     export class VulkanEngine {
@@ -142,7 +142,7 @@ namespace vk::engine {
             context::FrameData& frData   = frames_[state_.frame_number % context::FRAME_OVERLAP];
             frData.asyncComputeSubmitted = false;
             renderer.record_graphics(cmd, ctx_, frm);
-            ui_system.record_imgui(frm);
+            ui_system.record_imgui(cmd, frm);
             switch (renderer_caps_.presentation_mode) {
             case context::PresentationMode::EngineBlit:
                 {
