@@ -16,7 +16,7 @@ set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 # ============================================================================
 # Dependencies
 # ============================================================================
-find_package(Vulkan REQUIRED)
+find_package(Vulkan REQUIRED COMPONENTS shaderc_combined)
 include(FetchContent)
 set(SDL_TESTS OFF CACHE BOOL "" FORCE)
 set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -86,7 +86,7 @@ target_sources(vk_vis
         module/vk.engine.ixx
         module/vk.context.ixx
 )
-target_link_libraries(vk_vis PUBLIC Vulkan::Vulkan shaderc_combined)
+target_link_libraries(vk_vis PUBLIC Vulkan::Vulkan Vulkan::shaderc_combined)
 if (TARGET SDL3-shared)
     target_link_libraries(vk_vis PUBLIC $<BUILD_INTERFACE:SDL3-shared>)
 elseif (TARGET SDL3::SDL3)
