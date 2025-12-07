@@ -15,7 +15,7 @@ namespace vk::engine {
         { r.query_required_device_caps(caps) };
         { r.get_capabilities(caps) };
         { r.initialize(eng, caps, frm) };
-        { r.destroy(eng, caps) };
+        { r.destroy(eng) };
         { r.record_graphics(cmd, eng, frm) };
     };
 
@@ -94,7 +94,7 @@ namespace vk::engine {
         this->create_renderer_targets();
         this->create_command_buffers();
         renderer.initialize(this->ctx_, this->renderer_caps_, this->make_frame_context(state_.frame_number, 0u, swapchain_.swapchain_extent));
-        mdq_.emplace_back([&] { renderer.destroy(this->ctx_, this->renderer_caps_); });
+        mdq_.emplace_back([&] { renderer.destroy(this->ctx_); });
         ui_system.create_imgui(this->ctx_, swapchain_.swapchain_image_format, static_cast<uint32_t>(swapchain_.swapchain_images.size()));
         mdq_.emplace_back([&] {
             vkDeviceWaitIdle(this->ctx_.device);
