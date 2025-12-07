@@ -2,10 +2,9 @@ module;
 #include "VkBootstrap.h"
 #include <SDL3/SDL.h>
 #include <functional>
+#include <print>
 #include <ranges>
 #include <string>
-
-#include <shaderc/shaderc.hpp>
 export module vk.engine;
 import vk.context;
 
@@ -62,6 +61,8 @@ namespace vk::engine {
         void begin_frame(uint32_t& image_index, VkCommandBuffer& cmd);
         void end_frame(uint32_t image_index, VkCommandBuffer cmd);
 
+        void queue_swapchain_screenshot(uint32_t image_index, VkCommandBuffer cmd);
+
     private:
         context::FrameContext make_frame_context(uint64_t frame_index, uint32_t image_index, VkExtent2D extent);
         struct EngineState {
@@ -74,6 +75,7 @@ namespace vk::engine {
             bool resize_requested{false};
             bool minimized{false};
             bool focused{true};
+            bool screenshot{false};
             uint64_t frame_number{0};
             float time_sec{0.0};
             float dt_sec{0.0};
@@ -144,6 +146,13 @@ namespace vk::engine {
                 case SDL_EVENT_WINDOW_FOCUS_LOST: state_.focused = false; break;
                 case SDL_EVENT_WINDOW_RESIZED:
                 case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: state_.resize_requested = true; break;
+                case SDL_EVENT_KEY_DOWN:
+                    {
+                        if (e.key.key == SDLK_F1) {
+                            this->state_.screenshot = true;
+                        }
+                    }
+                    break;
                 default: break;
                 }
                 ui_system.process_event(e);
@@ -156,11 +165,11 @@ namespace vk::engine {
                 continue;
             }
 
-            uint32_t imageIndex = 0;
-            VkCommandBuffer cmd = VK_NULL_HANDLE;
-            this->begin_frame(imageIndex, cmd);
+            uint32_t image_index = 0;
+            VkCommandBuffer cmd  = VK_NULL_HANDLE;
+            this->begin_frame(image_index, cmd);
             if (cmd == VK_NULL_HANDLE) continue;
-            context::FrameContext frm    = make_frame_context(state_.frame_number, imageIndex, swapchain_.swapchain_extent);
+            context::FrameContext frm    = make_frame_context(state_.frame_number, image_index, swapchain_.swapchain_extent);
             context::FrameData& frData   = frames_[state_.frame_number % context::FRAME_OVERLAP];
             frData.asyncComputeSubmitted = false;
             renderer.record_graphics(cmd, this->ctx_, frm);
@@ -170,12 +179,12 @@ namespace vk::engine {
             case context::PresentationMode::EngineBlit:
                 {
                     if (renderer_caps_.presentation_mode != context::PresentationMode::EngineBlit) return;
-                    if (imageIndex >= swapchain_.swapchain_images.size()) return;
+                    if (image_index >= swapchain_.swapchain_images.size()) return;
                     if (presentation_attachment_index_ < 0 || presentation_attachment_index_ >= static_cast<int>(swapchain_.color_attachments.size())) return;
                     const auto& srcAtt = swapchain_.color_attachments[static_cast<size_t>(presentation_attachment_index_)];
                     VkImage src        = srcAtt.image.image;
                     if (src == VK_NULL_HANDLE) return;
-                    VkImage dst = swapchain_.swapchain_images[imageIndex];
+                    VkImage dst = swapchain_.swapchain_images[image_index];
                     VkImageMemoryBarrier2 barriers[2]{};
                     barriers[0].sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
                     barriers[0].srcStageMask     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
@@ -224,7 +233,16 @@ namespace vk::engine {
             case context::PresentationMode::DirectToSwapchain:
             default: break;
             }
-            end_frame(imageIndex, cmd);
+            if (state_.screenshot) queue_swapchain_screenshot(image_index, cmd);
+            end_frame(image_index, cmd);
+            if (state_.screenshot) {
+                if (!frData.dq.empty()) {
+                    vkQueueWaitIdle(ctx_.graphics_queue);
+                    for (auto& fn : frData.dq) fn();
+                    frData.dq.clear();
+                    state_.screenshot = false;
+                }
+            }
             state_.frame_number++;
         }
     }
