@@ -14,7 +14,7 @@ namespace vk::engine {
     concept CRenderer = requires(T r, context::EngineContext& eng, context::FrameContext& frm, context::RendererCaps& caps, VkCommandBuffer &cmd) {
         { r.query_required_device_caps(caps) };
         { r.get_capabilities(caps) };
-        { r.initialize(eng, caps, frm) };
+        { r.initialize(eng, caps) };
         { r.destroy(eng) };
         { r.record_graphics(cmd, eng, frm) };
     };
@@ -93,7 +93,7 @@ namespace vk::engine {
         this->create_swapchain();
         this->create_renderer_targets();
         this->create_command_buffers();
-        renderer.initialize(this->ctx_, this->renderer_caps_, this->make_frame_context(state_.frame_number, 0u, swapchain_.swapchain_extent));
+        renderer.initialize(this->ctx_, this->renderer_caps_);
         mdq_.emplace_back([&] { renderer.destroy(this->ctx_); });
         ui_system.create_imgui(this->ctx_, swapchain_.swapchain_image_format, static_cast<uint32_t>(swapchain_.swapchain_images.size()));
         mdq_.emplace_back([&] {
@@ -148,7 +148,7 @@ namespace vk::engine {
             context::FrameContext frm    = make_frame_context(state_.frame_number, imageIndex, swapchain_.swapchain_extent);
             context::FrameData& frData   = frames_[state_.frame_number % context::FRAME_OVERLAP];
             frData.asyncComputeSubmitted = false;
-            renderer.record_graphics(cmd, ctx_, frm);
+            renderer.record_graphics(cmd, this->ctx_, frm);
             ui_system.record_imgui(cmd, frm);
             switch (renderer_caps_.presentation_mode) {
             case context::PresentationMode::EngineBlit:
