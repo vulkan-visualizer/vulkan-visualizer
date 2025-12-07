@@ -232,16 +232,17 @@ private:
 int main() {
     vk::engine::VulkanEngine engine;
     vk::plugins::Viewport3DPlugin viewport_plugin;
+    vk::plugins::ScreenshotPlugin screenshot_plugin;
     WireframeBoxPlugin box_plugin;
 
     // Wire up plugins
     box_plugin.set_viewport_plugin(&viewport_plugin);
 
     // Initialize engine with both plugins
-    engine.init(viewport_plugin, box_plugin);
+    engine.init(viewport_plugin, box_plugin, screenshot_plugin);
 
     // Run main loop
-    engine.run(viewport_plugin, box_plugin);
+    engine.run(viewport_plugin, box_plugin, screenshot_plugin);
 
     // Cleanup
     engine.cleanup();

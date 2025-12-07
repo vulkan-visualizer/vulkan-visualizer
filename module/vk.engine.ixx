@@ -96,7 +96,6 @@ namespace vk::engine {
         void begin_frame(uint32_t& image_index, VkCommandBuffer& cmd);
         void end_frame(uint32_t image_index, VkCommandBuffer cmd);
 
-        void queue_swapchain_screenshot(uint32_t image_index, VkCommandBuffer cmd);
         void blit_offscreen_to_swapchain(uint32_t image_index, VkCommandBuffer cmd, VkExtent2D extent);
 
     private:
@@ -111,7 +110,6 @@ namespace vk::engine {
             bool resize_requested{false};
             bool minimized{false};
             bool focused{true};
-            bool screenshot{false};
             uint64_t frame_number{0};
             float time_sec{0.0};
             float dt_sec{0.0};
@@ -192,11 +190,6 @@ namespace vk::engine {
                 case SDL_EVENT_WINDOW_RESIZED:
                 case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
                     state_.resize_requested = true;
-                    break;
-                case SDL_EVENT_KEY_DOWN:
-                    if (e.key.key == SDLK_F1) {
-                        this->state_.screenshot = true;
-                    }
                     break;
                 default: break;
                 }
@@ -280,18 +273,8 @@ namespace vk::engine {
                 }
             }(), ...);
 
-            if (state_.screenshot) queue_swapchain_screenshot(image_index, cmd);
-
             end_frame(image_index, cmd);
 
-            if (state_.screenshot) {
-                if (!frData.dq.empty()) {
-                    vkQueueWaitIdle(ctx_.graphics_queue);
-                    for (auto& fn : frData.dq) fn();
-                    frData.dq.clear();
-                    state_.screenshot = false;
-                }
-            }
 
             state_.frame_number++;
         }

@@ -330,66 +330,7 @@ void vk::engine::VulkanEngine::end_frame(uint32_t image_index, VkCommandBuffer c
     }
     VK_CHECK(pres);
 }
-void vk::engine::VulkanEngine::queue_swapchain_screenshot(uint32_t image_index, VkCommandBuffer cmd) {
-    if (image_index >= swapchain_.swapchain_images.size()) return;
-    const uint32_t w = swapchain_.swapchain_extent.width;
-    const uint32_t h = swapchain_.swapchain_extent.height;
-    VkImage img      = swapchain_.swapchain_images[image_index];
-    VkDeviceSize sz  = static_cast<VkDeviceSize>(w) * static_cast<VkDeviceSize>(h) * 4u;
-    VkBuffer buffer  = VK_NULL_HANDLE;
-    VmaAllocation alloc{};
-    VmaAllocationInfo aout{};
-    VkBufferCreateInfo bci{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .pNext = nullptr, .flags = 0u, .size = sz, .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE, .queueFamilyIndexCount = 0u, .pQueueFamilyIndices = nullptr};
-    VmaAllocationCreateInfo ainfo{.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT, .usage = VMA_MEMORY_USAGE_AUTO, .requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT};
-    VK_CHECK(vmaCreateBuffer(ctx_.allocator, &bci, &ainfo, &buffer, &alloc, &aout));
-    VkImageMemoryBarrier2 to_src{.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .pNext                          = nullptr,
-        .srcStageMask                   = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-        .srcAccessMask                  = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        .dstStageMask                   = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-        .dstAccessMask                  = VK_ACCESS_2_TRANSFER_READ_BIT,
-        .oldLayout                      = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .newLayout                      = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        .image                          = img,
-        .subresourceRange               = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
-    VkDependencyInfo dep_to_src{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .pNext = nullptr, .dependencyFlags = 0u, .memoryBarrierCount = 0u, .pMemoryBarriers = nullptr, .bufferMemoryBarrierCount = 0u, .pBufferMemoryBarriers = nullptr, .imageMemoryBarrierCount = 1u, .pImageMemoryBarriers = &to_src};
-    vkCmdPipelineBarrier2(cmd, &dep_to_src);
-    VkBufferImageCopy region{.bufferOffset = 0, .bufferRowLength = 0, .bufferImageHeight = 0, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageOffset = {0, 0, 0}, .imageExtent = {w, h, 1}};
-    vkCmdCopyImageToBuffer(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &region);
-    VkImageMemoryBarrier2 back_dst{.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .pNext                            = nullptr,
-        .srcStageMask                     = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-        .srcAccessMask                    = VK_ACCESS_2_TRANSFER_READ_BIT,
-        .dstStageMask                     = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-        .dstAccessMask                    = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        .oldLayout                        = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        .newLayout                        = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .image                            = img,
-        .subresourceRange                 = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
-    VkDependencyInfo dep_back{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .pNext = nullptr, .dependencyFlags = 0u, .memoryBarrierCount = 0u, .pMemoryBarriers = nullptr, .bufferMemoryBarrierCount = 0u, .pBufferMemoryBarriers = nullptr, .imageMemoryBarrierCount = 1u, .pImageMemoryBarriers = &back_dst};
-    vkCmdPipelineBarrier2(cmd, &dep_back);
-    context::FrameData& fr    = frames_[state_.frame_number % context::FRAME_OVERLAP];
-    const std::string outPath = "screenshot_" + std::to_string(state_.frame_number) + ".png";
-#ifdef VV_ENABLE_LOGGING
-    log_line(std::string("Queued screenshot: ") + outPath);
-#endif
-    fr.dq.emplace_back([this, buffer, alloc, outPath, w, h] {
-        void* p = nullptr;
-        vmaMapMemory(ctx_.allocator, alloc, &p);
-        const uint8_t* bgra = static_cast<const uint8_t*>(p);
-        std::vector<uint8_t> rgba;
-        rgba.resize(static_cast<size_t>(w) * static_cast<size_t>(h) * 4ull);
-        for (size_t i = 0, n = static_cast<size_t>(w) * static_cast<size_t>(h); i < n; ++i) {
-            rgba[i * 4 + 0] = bgra[i * 4 + 2];
-            rgba[i * 4 + 1] = bgra[i * 4 + 1];
-            rgba[i * 4 + 2] = bgra[i * 4 + 0];
-            rgba[i * 4 + 3] = bgra[i * 4 + 3];
-        }
-        stbi_write_png(outPath.c_str(), static_cast<int>(w), static_cast<int>(h), 4, rgba.data(), static_cast<int>(w * 4));
-        vmaUnmapMemory(ctx_.allocator, alloc);
-        vmaDestroyBuffer(ctx_.allocator, buffer, alloc);
-    });
-}
+
 void vk::engine::VulkanEngine::blit_offscreen_to_swapchain(uint32_t image_index, VkCommandBuffer cmd, VkExtent2D extent) {
     if (renderer_caps_.presentation_mode != context::PresentationMode::EngineBlit) return;
     if (image_index >= swapchain_.swapchain_images.size()) return;

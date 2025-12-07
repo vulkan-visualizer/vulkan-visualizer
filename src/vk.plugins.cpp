@@ -3,13 +3,20 @@ module;
 #include <array>
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_vulkan.h>
+#include <chrono>
 #include <fstream>
+#include <iomanip>
 #include <imgui.h>
 #include <print>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 #include <vulkan/vulkan.h>
+
+#include "vk_mem_alloc.h"
+#include <stb_image_write.h>
+
 module vk.plugins;
 import vk.camera;
 
@@ -492,6 +499,246 @@ namespace vk::plugins {
                 draw_axis(axis, false);
             }
         }
+    }
+
+    // ============================================================================
+    // Screenshot Plugin Implementation
+    // ============================================================================
+
+    engine::PluginPhase ScreenshotPlugin::phases() const {
+        return engine::PluginPhase::Initialize |
+               engine::PluginPhase::PreRender |
+               engine::PluginPhase::Present |
+               engine::PluginPhase::Cleanup;
+    }
+
+    void ScreenshotPlugin::on_initialize(engine::PluginContext& ctx) {
+        std::println("[{}] Initialized - Ready to capture screenshots (F1 to capture)", name());
+    }
+
+    void ScreenshotPlugin::on_pre_render(engine::PluginContext& ctx) {
+        // Process pending screenshot from previous frame
+        if (pending_capture_.buffer != VK_NULL_HANDLE && ctx.engine) {
+            // Wait for GPU to complete
+            vkQueueWaitIdle(ctx.engine->graphics_queue);
+
+            // Map buffer and save screenshot
+            void* pixel_data = nullptr;
+            vmaMapMemory(ctx.engine->allocator, pending_capture_.allocation, &pixel_data);
+
+            if (pixel_data) {
+                save_screenshot(
+                    pixel_data,
+                    pending_capture_.width,
+                    pending_capture_.height,
+                    pending_capture_.output_path
+                );
+
+                vmaUnmapMemory(ctx.engine->allocator, pending_capture_.allocation);
+            }
+
+            // Cleanup buffer
+            vmaDestroyBuffer(ctx.engine->allocator, pending_capture_.buffer, pending_capture_.allocation);
+            pending_capture_ = {};
+        }
+    }
+
+    void ScreenshotPlugin::on_present(engine::PluginContext& ctx) {
+        if (!screenshot_requested_) return;
+
+        // Capture the current frame
+        const uint32_t image_index = ctx.frame->image_index;
+        capture_swapchain(ctx, image_index);
+        screenshot_requested_ = false;
+    }
+
+    void ScreenshotPlugin::on_cleanup(engine::PluginContext& ctx) {
+        // Clean up any pending capture resources
+        if (pending_capture_.buffer != VK_NULL_HANDLE && ctx.engine) {
+            vmaDestroyBuffer(ctx.engine->allocator, pending_capture_.buffer, pending_capture_.allocation);
+            pending_capture_ = {};
+        }
+        std::println("[{}] Cleanup complete", name());
+    }
+
+    void ScreenshotPlugin::on_event(const SDL_Event& event) {
+        if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F1) {
+            request_screenshot();
+        }
+    }
+
+    void ScreenshotPlugin::request_screenshot() {
+        screenshot_requested_ = true;
+        std::println("[{}] Screenshot requested", name());
+    }
+
+    void ScreenshotPlugin::request_screenshot(const ScreenshotConfig& config) {
+        config_ = config;
+        request_screenshot();
+    }
+
+    void ScreenshotPlugin::capture_swapchain(engine::PluginContext& ctx, uint32_t image_index) {
+        if (!ctx.engine || !ctx.cmd || !ctx.frame) return;
+
+        // Get swapchain image info
+        const uint32_t w = ctx.frame->extent.width;
+        const uint32_t h = ctx.frame->extent.height;
+        VkImage img = ctx.frame->swapchain_image;
+
+        if (img == VK_NULL_HANDLE) {
+            std::println("[{}] Error: Invalid swapchain image", name());
+            return;
+        }
+
+        // Calculate buffer size
+        const VkDeviceSize buffer_size = static_cast<VkDeviceSize>(w) * static_cast<VkDeviceSize>(h) * 4u;
+
+        // Create staging buffer
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VmaAllocation alloc{};
+        VmaAllocationInfo alloc_info{};
+
+        VkBufferCreateInfo buffer_ci{
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size = buffer_size,
+            .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE
+        };
+
+        VmaAllocationCreateInfo alloc_ci{
+            .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+            .usage = VMA_MEMORY_USAGE_AUTO,
+            .requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        };
+
+        VK_CHECK(vmaCreateBuffer(ctx.engine->allocator, &buffer_ci, &alloc_ci, &buffer, &alloc, &alloc_info));
+
+        // Transition image to transfer source
+        VkImageMemoryBarrier2 to_src{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            .image = img,
+            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
+        };
+
+        VkDependencyInfo dep_to_src{
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &to_src
+        };
+
+        vkCmdPipelineBarrier2(*ctx.cmd, &dep_to_src);
+
+        // Copy image to buffer
+        VkBufferImageCopy region{
+            .bufferOffset = 0,
+            .bufferRowLength = 0,
+            .bufferImageHeight = 0,
+            .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+            .imageOffset = {0, 0, 0},
+            .imageExtent = {w, h, 1}
+        };
+
+        vkCmdCopyImageToBuffer(*ctx.cmd, img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &region);
+
+        // Transition image back to present
+        VkImageMemoryBarrier2 back_present{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            .srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+            .dstAccessMask = 0,
+            .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            .image = img,
+            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
+        };
+
+        VkDependencyInfo dep_back{
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &back_present
+        };
+
+        vkCmdPipelineBarrier2(*ctx.cmd, &dep_back);
+
+        // Store capture data for processing after frame submission
+        pending_capture_ = {buffer, alloc, w, h, generate_filename()};
+
+        std::println("[{}] Screenshot capture queued", name());
+    }
+
+    void ScreenshotPlugin::save_screenshot(void* pixel_data, uint32_t width, uint32_t height, const std::string& path) {
+        if (!pixel_data) return;
+
+        const uint8_t* bgra = static_cast<const uint8_t*>(pixel_data);
+        std::vector<uint8_t> rgba;
+        rgba.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 4ull);
+
+        // Convert BGRA to RGBA
+        for (size_t i = 0, n = static_cast<size_t>(width) * static_cast<size_t>(height); i < n; ++i) {
+            rgba[i * 4 + 0] = bgra[i * 4 + 2];  // R
+            rgba[i * 4 + 1] = bgra[i * 4 + 1];  // G
+            rgba[i * 4 + 2] = bgra[i * 4 + 0];  // B
+            rgba[i * 4 + 3] = bgra[i * 4 + 3];  // A
+        }
+
+        // Save based on format
+        switch (config_.format) {
+        case ScreenshotFormat::PNG:
+            stbi_write_png(path.c_str(), static_cast<int>(width), static_cast<int>(height), 4, rgba.data(), static_cast<int>(width) * 4);
+            break;
+        case ScreenshotFormat::JPG:
+            stbi_write_jpg(path.c_str(), static_cast<int>(width), static_cast<int>(height), 4, rgba.data(), config_.jpeg_quality);
+            break;
+        case ScreenshotFormat::BMP:
+            stbi_write_bmp(path.c_str(), static_cast<int>(width), static_cast<int>(height), 4, rgba.data());
+            break;
+        case ScreenshotFormat::TGA:
+            stbi_write_tga(path.c_str(), static_cast<int>(width), static_cast<int>(height), 4, rgba.data());
+            break;
+        }
+
+        std::println("[{}] Screenshot saved: {}", name(), path);
+    }
+
+    std::string ScreenshotPlugin::generate_filename() const {
+        if (!config_.auto_filename) {
+            return config_.output_directory + "/" + config_.filename_prefix;
+        }
+
+        // Generate timestamp-based filename
+        const auto now = std::chrono::system_clock::now();
+        const auto time_t_now = std::chrono::system_clock::to_time_t(now);
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+
+        std::tm tm{};
+#ifdef _WIN32
+        localtime_s(&tm, &time_t_now);
+#else
+        localtime_r(&time_t_now, &tm);
+#endif
+
+        std::ostringstream oss;
+        oss << config_.output_directory << "/"
+            << config_.filename_prefix << "_"
+            << std::put_time(&tm, "%Y%m%d_%H%M%S") << "_"
+            << std::setfill('0') << std::setw(3) << ms.count();
+
+        // Add extension based on format
+        switch (config_.format) {
+        case ScreenshotFormat::PNG: oss << ".png"; break;
+        case ScreenshotFormat::JPG: oss << ".jpg"; break;
+        case ScreenshotFormat::BMP: oss << ".bmp"; break;
+        case ScreenshotFormat::TGA: oss << ".tga"; break;
+        }
+
+        return oss.str();
     }
 
 } // namespace vk::plugins
