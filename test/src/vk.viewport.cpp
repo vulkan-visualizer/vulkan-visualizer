@@ -383,11 +383,6 @@ void vk::plugins::ViewportUI::destroy_imgui(const context::EngineContext& eng) {
     ImGui::DestroyContext();
 }
 void vk::plugins::ViewportUI::process_event(const SDL_Event& event) {
-    if (event.type == SDL_EVENT_KEY_DOWN) {
-        const auto mods = static_cast<SDL_Keymod>(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT | SDL_KMOD_ALT));
-        SDL_Keycode key = event.key.key;
-        std::print("Key down: key={} mod={}\n", key, static_cast<int>(mods));
-    }
     ImGui_ImplSDL3_ProcessEvent(&event);
 
     // Pass event to camera if ImGui doesn't capture it
@@ -404,9 +399,7 @@ void vk::plugins::ViewportUI::record_imgui(VkCommandBuffer& cmd, const context::
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
 
-    static bool show_demo_window = true;
     static bool show_camera_window = true;
-    ImGui::ShowDemoWindow(&show_demo_window);
 
     // Camera control panel
     if (show_camera_window && camera_) {
