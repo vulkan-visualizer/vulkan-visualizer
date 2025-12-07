@@ -11,6 +11,7 @@ module;
 #include <vector>
 #include <vulkan/vulkan.h>
 module vk.plugins.viewport;
+import vk.camera;
 
 // clang-format off
 #ifndef VK_CHECK
@@ -128,12 +129,22 @@ void vk::plugins::ViewportRenderer::record_graphics(VkCommandBuffer& cmd, const 
 
     transition_image_layout(cmd, target, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     begin_rendering(cmd, target, frm.extent);
-    draw_triangle(cmd, frm.extent);
+    draw_cube(cmd, frm.extent);
     end_rendering(cmd);
     transition_image_layout(cmd, target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
 }
 void vk::plugins::ViewportRenderer::create_pipeline_layout(const context::EngineContext& eng) {
-    constexpr VkPipelineLayoutCreateInfo lci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    VkPushConstantRange push_constant{
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .offset = 0,
+        .size = sizeof(float) * 32  // 2x mat4 (mvp + model)
+    };
+
+    const VkPipelineLayoutCreateInfo lci{
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &push_constant
+    };
     VK_CHECK(vkCreatePipelineLayout(eng.device, &lci, nullptr, &layout));
 }
 void vk::plugins::ViewportRenderer::create_graphics_pipeline(const context::EngineContext& eng) {
@@ -199,13 +210,19 @@ void vk::plugins::ViewportRenderer::create_graphics_pipeline(const context::Engi
     this->m_graphics_pipeline.rasterization_state = {
         .sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         .polygonMode = VK_POLYGON_MODE_FILL,
-        .cullMode    = VK_CULL_MODE_NONE,
+        .cullMode    = VK_CULL_MODE_BACK_BIT,
         .frontFace   = VK_FRONT_FACE_COUNTER_CLOCKWISE,
         .lineWidth   = 1.0f,
     };
     this->m_graphics_pipeline.multisample_state = {
         .sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
         .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+    };
+    this->m_graphics_pipeline.depth_stencil_state = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable = VK_FALSE,  // No depth buffer for now
+        .depthWriteEnable = VK_FALSE,
+        .depthCompareOp = VK_COMPARE_OP_LESS,
     };
     this->m_graphics_pipeline.color_blend_state = {
         .sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
@@ -228,6 +245,7 @@ void vk::plugins::ViewportRenderer::create_graphics_pipeline(const context::Engi
         .pViewportState      = &this->m_graphics_pipeline.viewport_state,
         .pRasterizationState = &this->m_graphics_pipeline.rasterization_state,
         .pMultisampleState   = &this->m_graphics_pipeline.multisample_state,
+        .pDepthStencilState  = &this->m_graphics_pipeline.depth_stencil_state,
         .pColorBlendState    = &this->m_graphics_pipeline.color_blend_state,
         .pDynamicState       = &this->m_graphics_pipeline.dynamic_state,
         .layout              = layout,
@@ -237,7 +255,7 @@ void vk::plugins::ViewportRenderer::create_graphics_pipeline(const context::Engi
     vkDestroyShaderModule(eng.device, vs, nullptr);
     vkDestroyShaderModule(eng.device, fs, nullptr);
 }
-void vk::plugins::ViewportRenderer::draw_triangle(VkCommandBuffer cmd, VkExtent2D extent) const {
+void vk::plugins::ViewportRenderer::draw_cube(VkCommandBuffer cmd, VkExtent2D extent) const {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, this->pipe);
 
     VkViewport viewport{
@@ -254,7 +272,26 @@ void vk::plugins::ViewportRenderer::draw_triangle(VkCommandBuffer cmd, VkExtent2
     };
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    vkCmdDraw(cmd, 3, 1, 0, 0);
+    // Compute MVP matrix
+    if (camera_) {
+        const auto& view = camera_->view_matrix();
+        const auto& proj = camera_->proj_matrix();
+        const auto model = camera::Mat4::identity();
+        const auto mvp = proj * view * model;
+
+        // Push constants: mvp (64 bytes) + model (64 bytes)
+        struct PushConstants {
+            float mvp[16];
+            float model[16];
+        } pc;
+
+        std::copy(mvp.m.begin(), mvp.m.end(), pc.mvp);
+        std::copy(model.m.begin(), model.m.end(), pc.model);
+
+        vkCmdPushConstants(cmd, this->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
+    }
+
+    vkCmdDraw(cmd, 36, 1, 0, 0);  // 36 vertices for cube (6 faces * 2 triangles * 3 vertices)
 }
 void vk::plugins::ViewportRenderer::begin_rendering(VkCommandBuffer& cmd, const context::AttachmentView& target, VkExtent2D extent) {
     constexpr VkClearValue clear_value{.color = {{0.f, 0.f, 0.f, 1.0f}}};
@@ -352,6 +389,15 @@ void vk::plugins::ViewportUI::process_event(const SDL_Event& event) {
         std::print("Key down: key={} mod={}\n", key, static_cast<int>(mods));
     }
     ImGui_ImplSDL3_ProcessEvent(&event);
+
+    // Pass event to camera if ImGui doesn't capture it
+    if (camera_) {
+        ImGuiIO& io = ImGui::GetIO();
+        const bool imgui_wants_input = io.WantCaptureMouse || io.WantCaptureKeyboard;
+        if (!imgui_wants_input) {
+            camera_->handle_event(event);
+        }
+    }
 }
 void vk::plugins::ViewportUI::record_imgui(VkCommandBuffer& cmd, const context::FrameContext& frm) {
     ImGui_ImplVulkan_NewFrame();
@@ -359,7 +405,68 @@ void vk::plugins::ViewportUI::record_imgui(VkCommandBuffer& cmd, const context::
     ImGui::NewFrame();
 
     static bool show_demo_window = true;
+    static bool show_camera_window = true;
     ImGui::ShowDemoWindow(&show_demo_window);
+
+    // Camera control panel
+    if (show_camera_window && camera_) {
+        ImGui::Begin("Camera Controls", &show_camera_window);
+
+        auto state = camera_->state();
+        bool changed = false;
+
+        // Mode selection
+        int mode = static_cast<int>(state.mode);
+        if (ImGui::RadioButton("Orbit Mode", mode == 0)) {
+            state.mode = camera::CameraMode::Orbit;
+            changed = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Fly Mode", mode == 1)) {
+            state.mode = camera::CameraMode::Fly;
+            changed = true;
+        }
+
+        ImGui::Separator();
+
+        // Orbit mode controls
+        if (state.mode == camera::CameraMode::Orbit) {
+            ImGui::Text("Orbit Mode Controls:");
+            changed |= ImGui::DragFloat3("Target", &state.target.x, 0.01f);
+            changed |= ImGui::DragFloat("Distance", &state.distance, 0.01f, 0.1f, 100.0f);
+            changed |= ImGui::DragFloat("Yaw", &state.yaw_deg, 0.5f);
+            changed |= ImGui::DragFloat("Pitch", &state.pitch_deg, 0.5f, -89.5f, 89.5f);
+        } else {
+            ImGui::Text("Fly Mode Controls (WASD+QE):");
+            changed |= ImGui::DragFloat3("Eye Position", &state.eye.x, 0.01f);
+            changed |= ImGui::DragFloat("Yaw", &state.fly_yaw_deg, 0.5f);
+            changed |= ImGui::DragFloat("Pitch", &state.fly_pitch_deg, 0.5f, -89.0f, 89.0f);
+        }
+
+        ImGui::Separator();
+        ImGui::Text("Projection:");
+        changed |= ImGui::DragFloat("FOV (deg)", &state.fov_y_deg, 0.5f, 10.0f, 120.0f);
+        changed |= ImGui::DragFloat("Near", &state.znear, 0.001f, 0.001f, state.zfar - 0.1f);
+        changed |= ImGui::DragFloat("Far", &state.zfar, 1.0f, state.znear + 0.1f, 10000.0f);
+
+        if (ImGui::Button("Home View (H)")) {
+            camera_->home_view();
+        }
+
+        ImGui::Separator();
+        ImGui::Text("Navigation:");
+        ImGui::BulletText("Hold Space/Alt + LMB: Rotate");
+        ImGui::BulletText("Hold Space/Alt + MMB: Pan");
+        ImGui::BulletText("Hold Space/Alt + RMB: Zoom");
+        ImGui::BulletText("Mouse Wheel: Zoom");
+        ImGui::BulletText("Fly Mode: Hold RMB + WASDQE");
+
+        if (changed) {
+            camera_->set_state(state);
+        }
+
+        ImGui::End();
+    }
 
     ImGui::Render();
 
@@ -440,11 +547,20 @@ void vk::plugins::ViewportUI::record_imgui(VkCommandBuffer& cmd, const context::
 }
 
 void vk::plugins::ViewpoertPlugin::initialize() {
+    camera_.home_view();
+    last_time_ms_ = SDL_GetTicks();
     std::println("Viewport Plugin initialized.");
 }
 void vk::plugins::ViewpoertPlugin::update() {
-    // std::println("Viewpoint Plugin updated.");
+    const uint64_t current_time = SDL_GetTicks();
+    const float dt = (current_time - last_time_ms_) / 1000.0f;
+    last_time_ms_ = current_time;
+
+    camera_.update(dt, viewport_w_, viewport_h_);
 }
 void vk::plugins::ViewpoertPlugin::shutdown() {
     std::println("Viewport Plugin shutdown.");
+}
+void vk::plugins::ViewpoertPlugin::handle_event(const SDL_Event& event) {
+    // Events are handled through ViewportUI
 }

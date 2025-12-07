@@ -129,6 +129,7 @@ target_sources(vk_vis
         PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
         module/vk.engine.ixx
         module/vk.context.ixx
+        module/vk.camera.ixx
 )
 target_link_libraries(vk_vis PUBLIC Vulkan::Vulkan)
 if (TARGET SDL3-shared)
