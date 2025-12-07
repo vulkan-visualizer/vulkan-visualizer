@@ -95,12 +95,6 @@ FetchContent_Declare(imgui_src
         GIT_SHALLOW TRUE
 )
 
-set(_IMGUI_IMPL "${CMAKE_CURRENT_BINARY_DIR}/imgui_impl.cpp")
-file(WRITE "${_IMGUI_IMPL}" [[
-#include "backends/imgui_impl_sdl3.h"
-#include "backends/imgui_impl_vulkan.h"
-]])
-
 FetchContent_MakeAvailable(SDL3 vk_bootstrap VMA_src stb imgui_src)
 
 set(_VK_BOOTSTRAP_SOURCES
@@ -129,7 +123,6 @@ target_sources(vk_vis
         ${_VK_BOOTSTRAP_SOURCES}
         ${_VMA_IMPL}
         ${_STB_IMPL}
-        ${_IMGUI_IMPL}
         ${_IMGUI_SOURCES}
         PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
         module/vk.engine.ixx
