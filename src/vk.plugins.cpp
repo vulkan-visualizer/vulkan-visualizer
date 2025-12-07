@@ -1,0 +1,642 @@
+module;
+#include <SDL3/SDL.h>
+#include <array>
+#include <backends/imgui_impl_sdl3.h>
+#include <backends/imgui_impl_vulkan.h>
+#include <fstream>
+#include <imgui.h>
+#include <print>
+#include <stdexcept>
+#include <string>
+#include <vector>
+#include <vulkan/vulkan.h>
+module vk.plugins;
+import vk.camera;
+
+// clang-format off
+#ifndef VK_CHECK
+#define VK_CHECK(x) do { VkResult _vk_check_res = (x); if (_vk_check_res != VK_SUCCESS) { throw std::runtime_error(std::string("Vulkan error ") + std::to_string(_vk_check_res) + " at " #x); } } while (false)
+#endif
+// clang-format on
+
+namespace vk::plugins {
+    // ============================================================================
+    // Helper Functions
+    // ============================================================================
+
+    static void transition_image_layout(VkCommandBuffer& cmd, const context::AttachmentView& target, VkImageLayout old_layout, VkImageLayout new_layout) {
+        auto [src_stage, dst_stage, src_access, dst_access] = [&]() -> std::array<std::uint64_t, 4> {
+            if (old_layout == VK_IMAGE_LAYOUT_GENERAL && new_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+                return {
+                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    VK_ACCESS_2_MEMORY_WRITE_BIT,
+                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                };
+            return {
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+            };
+        }();
+
+        VkImageMemoryBarrier2 barrier{
+            .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask     = src_stage,
+            .srcAccessMask    = src_access,
+            .dstStageMask     = dst_stage,
+            .dstAccessMask    = dst_access,
+            .oldLayout        = old_layout,
+            .newLayout        = new_layout,
+            .image            = target.image,
+            .subresourceRange = {target.aspect, 0, 1, 0, 1},
+        };
+        const VkDependencyInfo depInfo{
+            .sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers    = &barrier,
+        };
+        vkCmdPipelineBarrier2(cmd, &depInfo);
+    }
+
+    static void transition_to_color_attachment(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout) {
+        VkImageMemoryBarrier2 barrier{
+            .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .pNext            = nullptr,
+            .srcStageMask     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+            .srcAccessMask    = VK_ACCESS_2_MEMORY_WRITE_BIT,
+            .dstStageMask     = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .dstAccessMask    = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
+            .oldLayout        = old_layout,
+            .newLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .image            = image,
+            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u},
+        };
+        VkDependencyInfo dep{
+            .sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .imageMemoryBarrierCount = 1u,
+            .pImageMemoryBarriers    = &barrier,
+        };
+        vkCmdPipelineBarrier2(cmd, &dep);
+    }
+
+    // ============================================================================
+    // Viewport3DPlugin Implementation
+    // ============================================================================
+
+    Viewport3DPlugin::Viewport3DPlugin() {
+        camera_.home_view();
+        last_time_ms_ = SDL_GetTicks();
+    }
+
+    engine::PluginPhase Viewport3DPlugin::phases() const {
+        return engine::PluginPhase::Setup |
+               engine::PluginPhase::Initialize |
+               engine::PluginPhase::PreRender |
+               engine::PluginPhase::Render |
+               engine::PluginPhase::PostRender |
+               engine::PluginPhase::Cleanup;
+    }
+
+    void Viewport3DPlugin::on_setup(engine::PluginContext& ctx) {
+        // Configure renderer capabilities
+        ctx.caps->allow_async_compute = false;
+        ctx.caps->presentation_mode = context::PresentationMode::EngineBlit;
+        ctx.caps->preferred_swapchain_format = VK_FORMAT_B8G8R8A8_UNORM;
+        ctx.caps->color_attachments = {
+            context::AttachmentRequest{
+                .name = "color",
+                .format = VK_FORMAT_B8G8R8A8_UNORM,
+                .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                .samples = VK_SAMPLE_COUNT_1_BIT,
+                .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+                .initial_layout = VK_IMAGE_LAYOUT_GENERAL
+            }
+        };
+        ctx.caps->presentation_attachment = "color";
+
+        std::println("[{}] Setup complete - configured renderer capabilities", name());
+    }
+
+    void Viewport3DPlugin::on_initialize(engine::PluginContext& ctx) {
+        format_ = ctx.caps->color_attachments.empty()
+            ? VK_FORMAT_B8G8R8A8_UNORM
+            : ctx.caps->color_attachments.front().format;
+
+        color_blend_attachment_ = {
+            .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                              VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+        };
+
+        dynamic_states_[0] = VK_DYNAMIC_STATE_VIEWPORT;
+        dynamic_states_[1] = VK_DYNAMIC_STATE_SCISSOR;
+
+        create_pipeline_layout(*ctx.engine);
+        create_graphics_pipeline(*ctx.engine);
+        create_imgui(*ctx.engine, *ctx.frame);
+
+        std::println("[{}] Initialized - pipeline and UI created", name());
+    }
+
+    void Viewport3DPlugin::on_pre_render(engine::PluginContext& ctx) {
+        // Update camera
+        const uint64_t current_time = SDL_GetTicks();
+        const float dt = (current_time - last_time_ms_) / 1000.0f;
+        last_time_ms_ = current_time;
+
+        camera_.update(dt, viewport_width_, viewport_height_);
+    }
+
+    void Viewport3DPlugin::on_render(engine::PluginContext& ctx) {
+        const auto& target = ctx.frame->color_attachments.front();
+
+        transition_image_layout(*ctx.cmd, target, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        begin_rendering(*ctx.cmd, target, ctx.frame->extent);
+        draw_cube(*ctx.cmd, ctx.frame->extent);
+        end_rendering(*ctx.cmd);
+        transition_image_layout(*ctx.cmd, target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
+    }
+
+    void Viewport3DPlugin::on_post_render(engine::PluginContext& ctx) {
+        render_imgui(*ctx.cmd, *ctx.frame);
+    }
+
+    void Viewport3DPlugin::on_cleanup(engine::PluginContext& ctx) {
+        if (ctx.engine) {
+            vkDeviceWaitIdle(ctx.engine->device);
+            destroy_imgui(*ctx.engine);
+            vkDestroyPipeline(ctx.engine->device, pipeline_, nullptr);
+            vkDestroyPipelineLayout(ctx.engine->device, layout_, nullptr);
+        }
+        std::println("[{}] Cleanup complete", name());
+    }
+
+    void Viewport3DPlugin::on_event(const SDL_Event& event) {
+        ImGuiIO& io = ImGui::GetIO();
+        const bool imgui_wants_input = io.WantCaptureMouse || io.WantCaptureKeyboard;
+
+        if (!imgui_wants_input) {
+            camera_.handle_event(event);
+        }
+    }
+
+    void Viewport3DPlugin::on_resize(uint32_t width, uint32_t height) {
+        viewport_width_ = static_cast<int>(width);
+        viewport_height_ = static_cast<int>(height);
+    }
+
+    // ============================================================================
+    // Graphics Pipeline
+    // ============================================================================
+
+    void Viewport3DPlugin::create_pipeline_layout(const context::EngineContext& eng) {
+        VkPushConstantRange push_constant{
+            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+            .offset = 0,
+            .size = sizeof(float) * 32  // 2x mat4 (mvp + model)
+        };
+
+        const VkPipelineLayoutCreateInfo lci{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+            .pushConstantRangeCount = 1,
+            .pPushConstantRanges = &push_constant
+        };
+        VK_CHECK(vkCreatePipelineLayout(eng.device, &lci, nullptr, &layout_));
+    }
+
+    void Viewport3DPlugin::create_graphics_pipeline(const context::EngineContext& eng) {
+        VkShaderModule vs;
+        {
+            std::ifstream f("shader/viewport.vert.spv", std::ios::binary | std::ios::ate);
+            const size_t s = static_cast<size_t>(f.tellg());
+            f.seekg(0);
+            std::vector<char> d(s);
+            f.read(d.data(), static_cast<std::streamsize>(s));
+
+            VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+            ci.codeSize = d.size();
+            ci.pCode = reinterpret_cast<const uint32_t*>(d.data());
+            VK_CHECK(vkCreateShaderModule(eng.device, &ci, nullptr, &vs));
+        }
+
+        VkShaderModule fs;
+        {
+            std::ifstream f("shader/viewport.frag.spv", std::ios::binary | std::ios::ate);
+            const size_t s = static_cast<size_t>(f.tellg());
+            f.seekg(0);
+            std::vector<char> d(s);
+            f.read(d.data(), static_cast<std::streamsize>(s));
+
+            VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+            ci.codeSize = d.size();
+            ci.pCode = reinterpret_cast<const uint32_t*>(d.data());
+            VK_CHECK(vkCreateShaderModule(eng.device, &ci, nullptr, &fs));
+        }
+
+        const VkPipelineShaderStageCreateInfo stages[2] = {
+            {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = vs, .pName = "main"},
+            {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = fs, .pName = "main"},
+        };
+
+        pipeline_state_.rendering_info = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+            .colorAttachmentCount = 1,
+            .pColorAttachmentFormats = &format_,
+        };
+        pipeline_state_.vertex_input_state = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+        pipeline_state_.input_assembly_state = {.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
+        pipeline_state_.viewport_state = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1, .scissorCount = 1};
+        pipeline_state_.rasterization_state = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+            .polygonMode = VK_POLYGON_MODE_FILL,
+            .cullMode = VK_CULL_MODE_BACK_BIT,
+            .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+            .lineWidth = 1.0f,
+        };
+        pipeline_state_.multisample_state = {.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
+        pipeline_state_.depth_stencil_state = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO, .depthTestEnable = VK_FALSE, .depthWriteEnable = VK_FALSE, .depthCompareOp = VK_COMPARE_OP_LESS};
+        pipeline_state_.color_blend_state = {.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, .attachmentCount = 1, .pAttachments = &color_blend_attachment_};
+        pipeline_state_.dynamic_state = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = 2, .pDynamicStates = dynamic_states_};
+
+        VkGraphicsPipelineCreateInfo pci{
+            .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+            .pNext = &pipeline_state_.rendering_info,
+            .stageCount = 2,
+            .pStages = stages,
+            .pVertexInputState = &pipeline_state_.vertex_input_state,
+            .pInputAssemblyState = &pipeline_state_.input_assembly_state,
+            .pViewportState = &pipeline_state_.viewport_state,
+            .pRasterizationState = &pipeline_state_.rasterization_state,
+            .pMultisampleState = &pipeline_state_.multisample_state,
+            .pDepthStencilState = &pipeline_state_.depth_stencil_state,
+            .pColorBlendState = &pipeline_state_.color_blend_state,
+            .pDynamicState = &pipeline_state_.dynamic_state,
+            .layout = layout_,
+        };
+        VK_CHECK(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &pci, nullptr, &pipeline_));
+
+        vkDestroyShaderModule(eng.device, vs, nullptr);
+        vkDestroyShaderModule(eng.device, fs, nullptr);
+    }
+
+    void Viewport3DPlugin::draw_cube(VkCommandBuffer cmd, VkExtent2D extent) const {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
+
+        VkViewport viewport{
+            .width = static_cast<float>(extent.width),
+            .height = static_cast<float>(extent.height),
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f,
+        };
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+        VkRect2D scissor{.offset = {0, 0}, .extent = extent};
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+        // Compute MVP matrix
+        const auto& view = camera_.view_matrix();
+        const auto& proj = camera_.proj_matrix();
+        const auto model = camera::Mat4::identity();
+        const auto mvp = proj * view * model;
+
+        // Push constants
+        struct PushConstants {
+            float mvp[16];
+            float model[16];
+        } pc{};
+
+        std::copy(mvp.m.begin(), mvp.m.end(), pc.mvp);
+        std::copy(model.m.begin(), model.m.end(), pc.model);
+
+        vkCmdPushConstants(cmd, layout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
+        vkCmdDraw(cmd, 36, 1, 0, 0);  // 36 vertices for cube
+    }
+
+    void Viewport3DPlugin::begin_rendering(VkCommandBuffer& cmd, const context::AttachmentView& target, VkExtent2D extent) {
+        constexpr VkClearValue clear_value{.color = {{0.1f, 0.1f, 0.12f, 1.0f}}};
+        VkRenderingAttachmentInfo color_attachment{
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .imageView = target.view,
+            .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+            .clearValue = clear_value,
+        };
+        VkRenderingInfo render_info{
+            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+            .renderArea = {{0, 0}, extent},
+            .layerCount = 1,
+            .colorAttachmentCount = 1,
+            .pColorAttachments = &color_attachment,
+        };
+        vkCmdBeginRendering(cmd, &render_info);
+    }
+
+    void Viewport3DPlugin::end_rendering(VkCommandBuffer& cmd) {
+        vkCmdEndRendering(cmd);
+    }
+
+    // ============================================================================
+    // UI Implementation
+    // ============================================================================
+
+    void Viewport3DPlugin::create_imgui(context::EngineContext& eng, const context::FrameContext& frm) {
+        std::array<VkDescriptorPoolSize, 11> pool_sizes{{
+            {VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
+            {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000},
+            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000},
+            {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000},
+            {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000},
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000},
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
+            {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000},
+        }};
+        VkDescriptorPoolCreateInfo pool_info{
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+            .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+            .maxSets = 1000u * static_cast<uint32_t>(pool_sizes.size()),
+            .poolSizeCount = static_cast<uint32_t>(pool_sizes.size()),
+            .pPoolSizes = pool_sizes.data(),
+        };
+        VK_CHECK(vkCreateDescriptorPool(eng.device, &pool_info, nullptr, &eng.descriptor_allocator.pool));
+
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGuiIO& io = ImGui::GetIO();
+        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+        ImGui::StyleColorsDark();
+
+        if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+            ImGuiStyle& style = ImGui::GetStyle();
+            style.WindowRounding = 0.0f;
+            style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+        }
+
+        if (!ImGui_ImplSDL3_InitForVulkan(eng.window)) {
+            throw std::runtime_error("Failed to initialize ImGui SDL3 backend.");
+        }
+
+        ImGui_ImplVulkan_InitInfo init_info{};
+        init_info.Instance = eng.instance;
+        init_info.PhysicalDevice = eng.physical;
+        init_info.Device = eng.device;
+        init_info.QueueFamily = eng.graphics_queue_family;
+        init_info.Queue = eng.graphics_queue;
+        init_info.DescriptorPool = eng.descriptor_allocator.pool;
+        init_info.MinImageCount = context::FRAME_OVERLAP;
+        init_info.ImageCount = context::FRAME_OVERLAP;
+        init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+        init_info.CheckVkResultFn = [](VkResult res) { VK_CHECK(res); };
+        init_info.UseDynamicRendering = VK_TRUE;
+
+        VkPipelineRenderingCreateInfo rendering_info{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+            .colorAttachmentCount = 1,
+            .pColorAttachmentFormats = &frm.swapchain_format,
+        };
+        init_info.PipelineRenderingCreateInfo = rendering_info;
+
+        if (!ImGui_ImplVulkan_Init(&init_info)) {
+            throw std::runtime_error("Failed to initialize ImGui Vulkan backend.");
+        }
+    }
+
+    void Viewport3DPlugin::destroy_imgui(const context::EngineContext& eng) {
+        ImGui_ImplVulkan_Shutdown();
+        ImGui_ImplSDL3_Shutdown();
+        ImGui::DestroyContext();
+    }
+
+    void Viewport3DPlugin::render_imgui(VkCommandBuffer& cmd, const context::FrameContext& frm) {
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+
+        if (show_camera_panel_) {
+            draw_camera_panel();
+        }
+
+        draw_mini_axis_gizmo();
+
+        ImGui::Render();
+
+        // Render to target
+        VkImage target_image = VK_NULL_HANDLE;
+        VkImageView target_view = VK_NULL_HANDLE;
+
+        if (frm.presentation_mode == context::PresentationMode::DirectToSwapchain) {
+            target_image = frm.swapchain_image;
+            target_view = frm.swapchain_image_view;
+            transition_to_color_attachment(cmd, target_image, VK_IMAGE_LAYOUT_UNDEFINED);
+        } else {
+            if (!frm.color_attachments.empty()) {
+                target_image = frm.color_attachments[0].image;
+                target_view = frm.color_attachments[0].view;
+                transition_to_color_attachment(cmd, target_image, VK_IMAGE_LAYOUT_GENERAL);
+            }
+        }
+
+        if (target_image != VK_NULL_HANDLE && target_view != VK_NULL_HANDLE) {
+            VkRenderingAttachmentInfo color_attachment{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                .imageView = target_view,
+                .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+            };
+            VkRenderingInfo rendering_info{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                .renderArea = {{0, 0}, frm.extent},
+                .layerCount = 1u,
+                .colorAttachmentCount = 1u,
+                .pColorAttachments = &color_attachment,
+            };
+            vkCmdBeginRendering(cmd, &rendering_info);
+            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+            vkCmdEndRendering(cmd);
+
+            ImGuiIO& io = ImGui::GetIO();
+            if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+                ImGui::UpdatePlatformWindows();
+                ImGui::RenderPlatformWindowsDefault();
+            }
+
+            if (frm.presentation_mode != context::PresentationMode::DirectToSwapchain) {
+                VkImageMemoryBarrier2 barrier{
+                    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+                    .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                    .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                    .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+                    .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+                    .image = target_image,
+                    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u},
+                };
+                VkDependencyInfo dep{
+                    .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                    .imageMemoryBarrierCount = 1u,
+                    .pImageMemoryBarriers = &barrier,
+                };
+                vkCmdPipelineBarrier2(cmd, &dep);
+            }
+        }
+    }
+
+    void Viewport3DPlugin::draw_camera_panel() {
+        ImGui::Begin("Camera Controls", &show_camera_panel_);
+
+        auto state = camera_.state();
+        bool changed = false;
+
+        // Mode selection
+        int mode = static_cast<int>(state.mode);
+        if (ImGui::RadioButton("Orbit Mode", mode == 0)) {
+            state.mode = camera::CameraMode::Orbit;
+            changed = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Fly Mode", mode == 1)) {
+            state.mode = camera::CameraMode::Fly;
+            changed = true;
+        }
+
+        ImGui::Separator();
+
+        if (state.mode == camera::CameraMode::Orbit) {
+            ImGui::Text("Orbit Mode Controls:");
+            changed |= ImGui::DragFloat3("Target", &state.target.x, 0.01f);
+            changed |= ImGui::DragFloat("Distance", &state.distance, 0.01f, 0.1f, 100.0f);
+            changed |= ImGui::DragFloat("Yaw", &state.yaw_deg, 0.5f);
+            changed |= ImGui::DragFloat("Pitch", &state.pitch_deg, 0.5f, -89.5f, 89.5f);
+        } else {
+            ImGui::Text("Fly Mode Controls (WASD+QE):");
+            changed |= ImGui::DragFloat3("Eye Position", &state.eye.x, 0.01f);
+            changed |= ImGui::DragFloat("Yaw", &state.fly_yaw_deg, 0.5f);
+            changed |= ImGui::DragFloat("Pitch", &state.fly_pitch_deg, 0.5f, -89.0f, 89.0f);
+        }
+
+        ImGui::Separator();
+        ImGui::Text("Projection:");
+        changed |= ImGui::DragFloat("FOV (deg)", &state.fov_y_deg, 0.5f, 10.0f, 120.0f);
+        changed |= ImGui::DragFloat("Near", &state.znear, 0.001f, 0.001f, state.zfar - 0.1f);
+        changed |= ImGui::DragFloat("Far", &state.zfar, 1.0f, state.znear + 0.1f, 10000.0f);
+
+        if (ImGui::Button("Home View (H)")) {
+            camera_.home_view();
+        }
+
+        ImGui::Separator();
+        ImGui::Text("Navigation:");
+        ImGui::BulletText("Hold Space/Alt + LMB: Rotate");
+        ImGui::BulletText("Hold Space/Alt + MMB: Pan");
+        ImGui::BulletText("Hold Space/Alt + RMB: Zoom");
+        ImGui::BulletText("Mouse Wheel: Zoom");
+        ImGui::BulletText("Fly Mode: Hold RMB + WASDQE");
+
+        if (changed) {
+            camera_.set_state(state);
+        }
+
+        ImGui::End();
+    }
+
+    void Viewport3DPlugin::draw_mini_axis_gizmo() const {
+        ImGuiViewport* viewport = ImGui::GetMainViewport();
+        if (!viewport) return;
+
+        ImDrawList* draw_list = ImGui::GetForegroundDrawList(viewport);
+        if (!draw_list) return;
+
+        constexpr float size = 80.0f;
+        constexpr float margin = 16.0f;
+        const ImVec2 center(
+            viewport->Pos.x + viewport->Size.x - margin - size * 0.5f,
+            viewport->Pos.y + margin + size * 0.5f
+        );
+        const float radius = size * 0.42f;
+
+        draw_list->AddCircleFilled(center, size * 0.5f, IM_COL32(30, 32, 36, 180), 48);
+        draw_list->AddCircle(center, size * 0.5f, IM_COL32(255, 255, 255, 60), 48, 1.5f);
+
+        const auto& view = camera_.view_matrix();
+
+        struct AxisInfo {
+            camera::Vec3 direction;
+            ImU32 color;
+            const char* label;
+        };
+
+        const AxisInfo axes[3] = {
+            {{1, 0, 0}, IM_COL32(255, 80, 80, 255), "X"},
+            {{0, 1, 0}, IM_COL32(80, 255, 80, 255), "Y"},
+            {{0, 0, 1}, IM_COL32(100, 140, 255, 255), "Z"}
+        };
+
+        struct TransformedAxis {
+            camera::Vec3 view_dir;
+            AxisInfo info;
+        };
+
+        TransformedAxis transformed[3];
+        for (int i = 0; i < 3; ++i) {
+            const auto& dir = axes[i].direction;
+            camera::Vec3 view_dir{
+                view.m[0] * dir.x + view.m[4] * dir.y + view.m[8] * dir.z,
+                view.m[1] * dir.x + view.m[5] * dir.y + view.m[9] * dir.z,
+                view.m[2] * dir.x + view.m[6] * dir.y + view.m[10] * dir.z
+            };
+            transformed[i] = {view_dir, axes[i]};
+        }
+
+        auto draw_axis = [&](const TransformedAxis& axis, bool is_back) {
+            const float thickness = is_back ? 2.0f : 3.0f;
+            const ImU32 base_color = axis.info.color;
+            const ImU32 color = is_back
+                ? IM_COL32(
+                    (base_color >> IM_COL32_R_SHIFT) & 0xFF,
+                    (base_color >> IM_COL32_G_SHIFT) & 0xFF,
+                    (base_color >> IM_COL32_B_SHIFT) & 0xFF,
+                    120)
+                : base_color;
+
+            const ImVec2 end_point(
+                center.x + axis.view_dir.x * radius,
+                center.y - axis.view_dir.y * radius
+            );
+
+            draw_list->AddLine(center, end_point, color, thickness);
+            const float circle_radius = is_back ? 3.0f : 4.5f;
+            draw_list->AddCircleFilled(end_point, circle_radius, color, 12);
+
+            if (!is_back) {
+                const float label_offset_x = axis.view_dir.x >= 0 ? 8.0f : -20.0f;
+                const float label_offset_y = axis.view_dir.y >= 0 ? -18.0f : 4.0f;
+                const ImVec2 label_pos(
+                    end_point.x + label_offset_x,
+                    end_point.y + label_offset_y
+                );
+                draw_list->AddText(label_pos, color, axis.info.label);
+            }
+        };
+
+        for (const auto& axis : transformed) {
+            if (axis.view_dir.z > 0.0f) {
+                draw_axis(axis, true);
+            }
+        }
+
+        for (const auto& axis : transformed) {
+            if (axis.view_dir.z <= 0.0f) {
+                draw_axis(axis, false);
+            }
+        }
+    }
+
+} // namespace vk::plugins
+

@@ -1,22 +1,18 @@
 import vk.engine;
-import vk.plugins.viewport;
+import vk.plugins;
 import vk.camera;
 
 int main() {
     vk::engine::VulkanEngine engine;
-    vk::plugins::ViewportRenderer renderer;
-    vk::plugins::ViewportUI ui_system;
-    vk::plugins::ViewpoertPlugin plugin;
+    vk::plugins::Viewport3DPlugin viewport_plugin;
 
-    // Wire up camera references
-    renderer.set_camera(&plugin.get_camera());
-    ui_system.set_camera(&plugin.get_camera());
+    // Initialize engine with viewport plugin
+    engine.init(viewport_plugin);
 
-    // Set initial viewport size
-    plugin.set_viewport_size(1920, 1280);
+    // Run main loop
+    engine.run(viewport_plugin);
 
-    engine.init(renderer, ui_system, plugin);
-    engine.run(renderer, ui_system, plugin);
+    // Cleanup
     engine.cleanup();
 
     return 0;
