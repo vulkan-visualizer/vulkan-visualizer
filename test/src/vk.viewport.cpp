@@ -468,6 +468,11 @@ void vk::plugins::ViewportUI::record_imgui(VkCommandBuffer& cmd, const context::
         ImGui::End();
     }
 
+    // Draw mini axis gizmo (top-right corner)
+    if (camera_) {
+        draw_mini_axis_gizmo();
+    }
+
     ImGui::Render();
 
     // Determine the target image and view based on presentation mode
@@ -542,6 +547,113 @@ void vk::plugins::ViewportUI::record_imgui(VkCommandBuffer& cmd, const context::
                 .pImageMemoryBarriers    = &barrier,
             };
             vkCmdPipelineBarrier2(cmd, &dep);
+        }
+    }
+}
+
+void vk::plugins::ViewportUI::draw_mini_axis_gizmo() const {
+    if (!camera_) return;
+
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
+    if (!viewport) return;
+
+    ImDrawList* draw_list = ImGui::GetForegroundDrawList(viewport);
+    if (!draw_list) return;
+
+    // Gizmo parameters
+    constexpr float size = 80.0f;
+    constexpr float margin = 16.0f;
+    const ImVec2 center(
+        viewport->Pos.x + viewport->Size.x - margin - size * 0.5f,
+        viewport->Pos.y + margin + size * 0.5f
+    );
+    const float radius = size * 0.42f;
+
+    // Semi-transparent background circle
+    draw_list->AddCircleFilled(center, size * 0.5f, IM_COL32(30, 32, 36, 180), 48);
+    draw_list->AddCircle(center, size * 0.5f, IM_COL32(255, 255, 255, 60), 48, 1.5f);
+
+    // Get view matrix to transform axis directions
+    const auto& view = camera_->view_matrix();
+
+    // Define axes in world space
+    struct AxisInfo {
+        camera::Vec3 direction;
+        ImU32 color;
+        const char* label;
+    };
+
+    const AxisInfo axes[3] = {
+        {{1, 0, 0}, IM_COL32(255, 80, 80, 255), "X"},   // Red X
+        {{0, 1, 0}, IM_COL32(80, 255, 80, 255), "Y"},   // Green Y
+        {{0, 0, 1}, IM_COL32(100, 140, 255, 255), "Z"}  // Blue Z
+    };
+
+    // Transform axes by view matrix and sort by depth
+    struct TransformedAxis {
+        camera::Vec3 view_dir;
+        AxisInfo info;
+    };
+
+    TransformedAxis transformed[3];
+    for (int i = 0; i < 3; ++i) {
+        const auto& dir = axes[i].direction;
+        // Apply view rotation (upper 3x3 of view matrix)
+        camera::Vec3 view_dir{
+            view.m[0] * dir.x + view.m[4] * dir.y + view.m[8] * dir.z,
+            view.m[1] * dir.x + view.m[5] * dir.y + view.m[9] * dir.z,
+            view.m[2] * dir.x + view.m[6] * dir.y + view.m[10] * dir.z
+        };
+        transformed[i] = {view_dir, axes[i]};
+    }
+
+    // Draw axes (back to front based on Z)
+    auto draw_axis = [&](const TransformedAxis& axis, bool is_back) {
+        const float thickness = is_back ? 2.0f : 3.0f;
+        const ImU32 base_color = axis.info.color;
+        const ImU32 color = is_back
+            ? IM_COL32(
+                (base_color >> IM_COL32_R_SHIFT) & 0xFF,
+                (base_color >> IM_COL32_G_SHIFT) & 0xFF,
+                (base_color >> IM_COL32_B_SHIFT) & 0xFF,
+                120)  // Dimmed for back-facing
+            : base_color;
+
+        const ImVec2 end_point(
+            center.x + axis.view_dir.x * radius,
+            center.y - axis.view_dir.y * radius  // Flip Y for screen space
+        );
+
+        // Draw axis line
+        draw_list->AddLine(center, end_point, color, thickness);
+
+        // Draw endpoint circle
+        const float circle_radius = is_back ? 3.0f : 4.5f;
+        draw_list->AddCircleFilled(end_point, circle_radius, color, 12);
+
+        // Draw label
+        if (!is_back) {
+            const float label_offset_x = axis.view_dir.x >= 0 ? 8.0f : -20.0f;
+            const float label_offset_y = axis.view_dir.y >= 0 ? -18.0f : 4.0f;
+            const ImVec2 label_pos(
+                end_point.x + label_offset_x,
+                end_point.y + label_offset_y
+            );
+            draw_list->AddText(label_pos, color, axis.info.label);
+        }
+    };
+
+    // Draw back-facing axes first (dimmed)
+    for (const auto& axis : transformed) {
+        if (axis.view_dir.z > 0.0f) {  // Pointing away from camera
+            draw_axis(axis, true);
+        }
+    }
+
+    // Draw front-facing axes (bright)
+    for (const auto& axis : transformed) {
+        if (axis.view_dir.z <= 0.0f) {  // Pointing toward camera
+            draw_axis(axis, false);
         }
     }
 }

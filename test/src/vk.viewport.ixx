@@ -56,6 +56,7 @@ namespace vk::plugins {
         void set_camera(camera::Camera* cam) { camera_ = cam; }
 
     private:
+        void draw_mini_axis_gizmo() const;
         camera::Camera* camera_{nullptr};
     };
     export class ViewpoertPlugin {
