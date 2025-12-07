@@ -2,73 +2,28 @@ name: windows-build
 
 on:
   push:
-    branches: [master, main]
   pull_request:
-    branches: [master, main]
-  workflow_dispatch: {}
-
-concurrency:
-  group: windows-build-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        build_type: [Release]
-    env:
-      VULKAN_SDK_VERSION: latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      - name: Cache third-party downloads (_deps)
-        uses: actions/cache@v4
-        with:
-          path: build/_deps
-          key: deps-${{ runner.os }}-${{ matrix.build_type }}-${{ hashFiles('CMakeLists.txt','cmake/*.cmake') }}
-          restore-keys: |
-            deps-${{ runner.os }}-${{ matrix.build_type }}-
-            deps-${{ runner.os }}-
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Install Vulkan SDK
-        uses: jakoch/install-vulkan-sdk-action@v1.2.5
+        uses: jakoch/install-vulkan-sdk-action@v1
         with:
-          version: ${{ env.VULKAN_SDK_VERSION }}
-          components: Vulkan-Headers,Vulkan-Loader,Glslang,SPIRV-Tools,SPIRV-Headers
+          version: latest
+          components: Vulkan-Headers,Vulkan-Loader,Glslang
           cache: true
-          quiet: true
 
-      - name: Verify Vulkan SDK tools
-        shell: powershell
-        run: |
-          Write-Host "VULKAN_SDK=$env:VULKAN_SDK"
-          if (Test-Path "$env:VULKAN_SDK\Bin\glslc.exe") { & "$env:VULKAN_SDK\Bin\glslc.exe" --version }
-          else { Write-Host 'glslc not found'; }
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -G "Ninja"
+          -DCMAKE_BUILD_TYPE=Release
 
-      - name: Configure (Ninja Multi-Config)
-        shell: powershell
-        run: |
-          cmake -S . -B build -G "Ninja Multi-Config" `
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON `
-
-      - name: Build (${{ matrix.build_type }})
-        shell: powershell
-        run: |
-          cmake --build build --config ${{ matrix.build_type }} --parallel
-
-      - name: Package portable release (${{ matrix.build_type }})
-        if: success()
-        shell: powershell
-        run: |
-          Compress-Archive -Path "build/${{ matrix.build_type }}/*" -DestinationPath "vulkan-visualizer-windows-x64-${{ matrix.build_type }}.zip"
-
-      - name: Upload build artifacts (${{ matrix.build_type }})
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-${{ matrix.build_type }}
-          path: vulkan-visualizer-windows-x64-${{ matrix.build_type }}.zip
-          if-no-files-found: error
-          retention-days: 7
+      - name: Build
+        run: cmake --build build --parallel
