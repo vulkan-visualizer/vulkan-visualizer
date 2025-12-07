@@ -19,8 +19,8 @@ namespace vk::engine {
     };
 
     export template <typename T>
-    concept CUiSystem = requires(T r, const char* title, context::EngineContext& eng, context::FrameContext& frm, VkCommandBuffer& cmd, const SDL_Event& event, VkFormat format, uint32_t n_swapchain_image) {
-        { r.create_imgui(eng, format, n_swapchain_image) };
+    concept CUiSystem = requires(T r, context::EngineContext& eng, context::FrameContext& frm, VkCommandBuffer& cmd, const SDL_Event& event) {
+        { r.create_imgui(eng, frm) };
         { r.destroy_imgui(eng) };
         { r.process_event(event) };
         { r.record_imgui(cmd, frm) };
@@ -107,7 +107,7 @@ namespace vk::engine {
         renderer.initialize(this->ctx_, this->renderer_caps_);
         mdq_.emplace_back([&] { renderer.destroy(this->ctx_); });
 
-        ui_system.create_imgui(this->ctx_, swapchain_.swapchain_image_format, static_cast<uint32_t>(swapchain_.swapchain_images.size()));
+        ui_system.create_imgui(this->ctx_, make_frame_context(state_.frame_number, 0u, swapchain_.swapchain_extent));
         mdq_.emplace_back([&] {
             vkDeviceWaitIdle(this->ctx_.device);
             ui_system.destroy_imgui(this->ctx_);
