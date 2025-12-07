@@ -47,6 +47,7 @@ namespace vk::engine {
         void destroy_context();
         void create_swapchain();
         void destroy_swapchain();
+        void recreate_swapchain();
         void create_renderer_targets();
         void destroy_renderer_targets();
         void create_command_buffers();
@@ -132,6 +133,13 @@ namespace vk::engine {
                 default: break;
                 }
                 ui_system.process_event(e);
+            }
+            if (state_.resize_requested) {
+                recreate_swapchain();
+                last_frm                      = make_frame_context(state_.frame_number, 0u, swapchain_.swapchain_extent);
+                last_frm.swapchain_image      = VK_NULL_HANDLE;
+                last_frm.swapchain_image_view = VK_NULL_HANDLE;
+                continue;
             }
 
             uint32_t imageIndex = 0;

@@ -157,6 +157,21 @@ void vk::engine::VulkanEngine::destroy_swapchain() {
     swapchain_.swapchain_images.clear();
     IF_NOT_NULL_DO_AND_SET(swapchain_.swapchain, vkDestroySwapchainKHR(ctx_.device, swapchain_.swapchain, nullptr), VK_NULL_HANDLE);
 }
+void vk::engine::VulkanEngine::recreate_swapchain() {
+    vkDeviceWaitIdle(ctx_.device);
+    destroy_swapchain();
+    destroy_renderer_targets();
+    int pxw = 0, pxh = 0;
+    SDL_GetWindowSizeInPixels(ctx_.window, &pxw, &pxh);
+    this->state_.width = std::max(1, pxw);
+    this->state_.height = std::max(1, pxh);
+    create_swapchain();
+    create_renderer_targets();
+    context::FrameContext frm = make_frame_context(state_.frame_number, 0u, swapchain_.swapchain_extent);
+    frm.swapchain_image       = VK_NULL_HANDLE;
+    frm.swapchain_image_view  = VK_NULL_HANDLE;
+    state_.resize_requested = false;
+}
 void vk::engine::VulkanEngine::create_renderer_targets() {
     destroy_renderer_targets();
     swapchain_.color_attachments.clear();
