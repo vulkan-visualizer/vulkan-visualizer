@@ -89,7 +89,32 @@ file(WRITE "${_STB_IMPL}" [[
 #endif
 ]])
 
-FetchContent_MakeAvailable(SDL3 vk_bootstrap VMA_src stb)
+FetchContent_Declare(imgui_src
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG v1.92.2b-docking
+        GIT_SHALLOW TRUE
+)
+
+set(_IMGUI_IMPL "${CMAKE_CURRENT_BINARY_DIR}/imgui_impl.cpp")
+file(WRITE "${_IMGUI_IMPL}" [[
+#include "backends/imgui_impl_sdl3.h"
+#include "backends/imgui_impl_vulkan.h"
+]])
+
+FetchContent_MakeAvailable(SDL3 vk_bootstrap VMA_src stb imgui_src)
+
+set(_VK_BOOTSTRAP_SOURCES
+        ${vk_bootstrap_SOURCE_DIR}/src/VkBootstrap.cpp
+)
+set(_IMGUI_SOURCES
+        ${imgui_src_SOURCE_DIR}/imgui.cpp
+        ${imgui_src_SOURCE_DIR}/imgui_demo.cpp
+        ${imgui_src_SOURCE_DIR}/imgui_draw.cpp
+        ${imgui_src_SOURCE_DIR}/imgui_tables.cpp
+        ${imgui_src_SOURCE_DIR}/imgui_widgets.cpp
+        ${imgui_src_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
+        ${imgui_src_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
+)
 
 
 # ============================================================================
@@ -101,9 +126,11 @@ target_sources(vk_vis
         PRIVATE
         src/vk.engine.cpp
         src/vk.context.cpp
-        ${vk_bootstrap_SOURCE_DIR}/src/VkBootstrap.cpp
+        ${_VK_BOOTSTRAP_SOURCES}
         ${_VMA_IMPL}
         ${_STB_IMPL}
+        ${_IMGUI_IMPL}
+        ${_IMGUI_SOURCES}
         PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
         module/vk.engine.ixx
         module/vk.context.ixx
@@ -119,4 +146,6 @@ target_include_directories(vk_vis PRIVATE
         $<BUILD_INTERFACE:${vk_bootstrap_SOURCE_DIR}/src>
         $<BUILD_INTERFACE:${vma_src_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${stb_SOURCE_DIR}>
+        $<BUILD_INTERFACE:${imgui_src_SOURCE_DIR}>
 )
+target_include_directories(vk_vis PUBLIC $<BUILD_INTERFACE:${imgui_src_SOURCE_DIR}>)
