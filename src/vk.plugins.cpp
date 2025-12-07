@@ -4,7 +4,6 @@ module;
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_vulkan.h>
 #include <chrono>
-#include <fstream>
 #include <iomanip>
 #include <imgui.h>
 #include <print>
@@ -12,92 +11,121 @@ module;
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <vk_mem_alloc.h>
 #include <vulkan/vulkan.h>
-
-#include "vk_mem_alloc.h"
 #include <stb_image_write.h>
 
 module vk.plugins;
 import vk.camera;
 
-// clang-format off
-#ifndef VK_CHECK
-#define VK_CHECK(x) do { VkResult _vk_check_res = (x); if (_vk_check_res != VK_SUCCESS) { throw std::runtime_error(std::string("Vulkan error ") + std::to_string(_vk_check_res) + " at " #x); } } while (false)
-#endif
-// clang-format on
+namespace {
+    constexpr auto reset = "\033[0m";
+    constexpr auto bold = "\033[1m";
+    constexpr auto red = "\033[31m";
+    constexpr auto green = "\033[32m";
+    constexpr auto yellow = "\033[33m";
+    constexpr auto blue = "\033[34m";
+    constexpr auto magenta = "\033[35m";
+    constexpr auto cyan = "\033[36m";
 
-namespace vk::plugins {
-    // ============================================================================
-    // Helper Functions
-    // ============================================================================
+    void vk_check(const VkResult result, const char* operation) {
+        if (result != VK_SUCCESS) {
+            throw std::runtime_error(std::format("{}{}Vulkan Error{}: {} (code: {})",
+                bold, red, reset, operation, static_cast<int>(result)));
+        }
+    }
 
-    static void transition_image_layout(VkCommandBuffer& cmd, const context::AttachmentView& target, VkImageLayout old_layout, VkImageLayout new_layout) {
-        auto [src_stage, dst_stage, src_access, dst_access] = [&]() -> std::array<std::uint64_t, 4> {
-            if (old_layout == VK_IMAGE_LAYOUT_GENERAL && new_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
-                return {
+    void log_plugin(const std::string_view plugin_name, const std::string_view message, const std::string_view color = cyan) {
+        std::println("{}{}[{}]{} {}", bold, color, plugin_name, reset, message);
+    }
+
+    void log_success(const std::string_view plugin_name, const std::string_view message) {
+        log_plugin(plugin_name, message, green);
+    }
+
+    void log_info(const std::string_view plugin_name, const std::string_view message) {
+        log_plugin(plugin_name, message, cyan);
+    }
+
+    void log_warning(const std::string_view plugin_name, const std::string_view message) {
+        log_plugin(plugin_name, message, yellow);
+    }
+
+    void log_error(const std::string_view plugin_name, const std::string_view message) {
+        log_plugin(plugin_name, message, red);
+    }
+
+    void transition_image_layout(VkCommandBuffer cmd, const vk::context::AttachmentView& target,
+                                  const VkImageLayout old_layout, const VkImageLayout new_layout) {
+        const auto [src_stage, dst_stage, src_access, dst_access] = [&] {
+            if (old_layout == VK_IMAGE_LAYOUT_GENERAL && new_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
+                return std::tuple{
                     VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                     VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                     VK_ACCESS_2_MEMORY_WRITE_BIT,
-                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT
                 };
-            return {
+            }
+            return std::tuple{
                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                 VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+                VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT
             };
         }();
 
-        VkImageMemoryBarrier2 barrier{
-            .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask     = src_stage,
-            .srcAccessMask    = src_access,
-            .dstStageMask     = dst_stage,
-            .dstAccessMask    = dst_access,
-            .oldLayout        = old_layout,
-            .newLayout        = new_layout,
-            .image            = target.image,
-            .subresourceRange = {target.aspect, 0, 1, 0, 1},
+        const VkImageMemoryBarrier2 barrier{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = src_stage,
+            .srcAccessMask = src_access,
+            .dstStageMask = dst_stage,
+            .dstAccessMask = dst_access,
+            .oldLayout = old_layout,
+            .newLayout = new_layout,
+            .image = target.image,
+            .subresourceRange = {target.aspect, 0, 1, 0, 1}
         };
-        const VkDependencyInfo depInfo{
-            .sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+
+        const VkDependencyInfo dep_info{
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
             .imageMemoryBarrierCount = 1,
-            .pImageMemoryBarriers    = &barrier,
+            .pImageMemoryBarriers = &barrier
         };
-        vkCmdPipelineBarrier2(cmd, &depInfo);
+
+        vkCmdPipelineBarrier2(cmd, &dep_info);
     }
 
-    static void transition_to_color_attachment(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout) {
-        VkImageMemoryBarrier2 barrier{
-            .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .pNext            = nullptr,
-            .srcStageMask     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-            .srcAccessMask    = VK_ACCESS_2_MEMORY_WRITE_BIT,
-            .dstStageMask     = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .dstAccessMask    = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
-            .oldLayout        = old_layout,
-            .newLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .image            = image,
-            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u},
+    void transition_to_color_attachment(const VkCommandBuffer cmd, const VkImage image, const VkImageLayout old_layout) {
+        const VkImageMemoryBarrier2 barrier{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+            .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
+            .oldLayout = old_layout,
+            .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .image = image,
+            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
         };
-        VkDependencyInfo dep{
-            .sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .imageMemoryBarrierCount = 1u,
-            .pImageMemoryBarriers    = &barrier,
+
+        const VkDependencyInfo dep{
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &barrier
         };
+
         vkCmdPipelineBarrier2(cmd, &dep);
     }
+}
 
-    // ============================================================================
-    // Viewport3DPlugin Implementation
-    // ============================================================================
-
+namespace vk::plugins {
     Viewport3DPlugin::Viewport3DPlugin() {
         camera_.home_view();
         last_time_ms_ = SDL_GetTicks();
+        log_info(name(), "Plugin created");
     }
 
-    engine::PluginPhase Viewport3DPlugin::phases() const {
+    engine::PluginPhase Viewport3DPlugin::phases() const noexcept {
         return engine::PluginPhase::Setup |
                engine::PluginPhase::Initialize |
                engine::PluginPhase::PreRender |
@@ -107,7 +135,6 @@ namespace vk::plugins {
     }
 
     void Viewport3DPlugin::on_setup(engine::PluginContext& ctx) {
-        // Configure renderer capabilities
         ctx.caps->allow_async_compute = false;
         ctx.caps->presentation_mode = context::PresentationMode::EngineBlit;
         ctx.caps->preferred_swapchain_format = VK_FORMAT_B8G8R8A8_UNORM;
@@ -123,29 +150,25 @@ namespace vk::plugins {
         };
         ctx.caps->presentation_attachment = "color";
 
-        std::println("[{}] Setup complete - configured renderer capabilities", name());
+        log_success(name(), "Setup complete → renderer configured");
     }
 
     void Viewport3DPlugin::on_initialize(engine::PluginContext& ctx) {
         create_imgui(*ctx.engine, *ctx.frame);
-        std::println("[{}] Initialized - UI created", name());
+        log_success(name(), "Initialized → UI ready");
     }
 
     void Viewport3DPlugin::on_pre_render(engine::PluginContext& ctx) {
-        // Update camera
-        const uint64_t current_time = SDL_GetTicks();
-        const float dt = (current_time - last_time_ms_) / 1000.0f;
+        const auto current_time = SDL_GetTicks();
+        const auto dt = static_cast<float>(current_time - last_time_ms_) / 1000.0f;
         last_time_ms_ = current_time;
-
         camera_.update(dt, viewport_width_, viewport_height_);
     }
 
     void Viewport3DPlugin::on_render(engine::PluginContext& ctx) {
         const auto& target = ctx.frame->color_attachments.front();
-
         transition_image_layout(*ctx.cmd, target, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
         begin_rendering(*ctx.cmd, target, ctx.frame->extent);
-        // Clear only - no built-in objects
         end_rendering(*ctx.cmd);
         transition_image_layout(*ctx.cmd, target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
     }
@@ -159,89 +182,89 @@ namespace vk::plugins {
             vkDeviceWaitIdle(ctx.engine->device);
             destroy_imgui(*ctx.engine);
         }
-        std::println("[{}] Cleanup complete", name());
+        log_success(name(), "Cleanup complete");
     }
 
     void Viewport3DPlugin::on_event(const SDL_Event& event) {
-        ImGuiIO& io = ImGui::GetIO();
-        const bool imgui_wants_input = io.WantCaptureMouse || io.WantCaptureKeyboard;
-
-        if (!imgui_wants_input) {
+        const auto& io = ImGui::GetIO();
+        if (const bool imgui_wants_input = io.WantCaptureMouse || io.WantCaptureKeyboard; !imgui_wants_input) {
             camera_.handle_event(event);
         }
     }
 
-    void Viewport3DPlugin::on_resize(uint32_t width, uint32_t height) {
+    void Viewport3DPlugin::on_resize(const uint32_t width, const uint32_t height) noexcept {
         viewport_width_ = static_cast<int>(width);
         viewport_height_ = static_cast<int>(height);
+        log_info(name(), std::format("Viewport resized → {}x{}", width, height));
     }
 
-    void Viewport3DPlugin::begin_rendering(VkCommandBuffer& cmd, const context::AttachmentView& target, VkExtent2D extent) {
+    void Viewport3DPlugin::begin_rendering(VkCommandBuffer& cmd, const context::AttachmentView& target, const VkExtent2D extent) {
         constexpr VkClearValue clear_value{.color = {{0.1f, 0.1f, 0.12f, 1.0f}}};
-        VkRenderingAttachmentInfo color_attachment{
+        const VkRenderingAttachmentInfo color_attachment{
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .imageView = target.view,
             .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-            .clearValue = clear_value,
+            .clearValue = clear_value
         };
-        VkRenderingInfo render_info{
+
+        const VkRenderingInfo render_info{
             .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
             .renderArea = {{0, 0}, extent},
             .layerCount = 1,
             .colorAttachmentCount = 1,
-            .pColorAttachments = &color_attachment,
+            .pColorAttachments = &color_attachment
         };
+
         vkCmdBeginRendering(cmd, &render_info);
     }
 
-    void Viewport3DPlugin::end_rendering(VkCommandBuffer& cmd) {
+    void Viewport3DPlugin::end_rendering(VkCommandBuffer& cmd) noexcept {
         vkCmdEndRendering(cmd);
     }
 
-    // ============================================================================
-    // UI Implementation
-    // ============================================================================
-
     void Viewport3DPlugin::create_imgui(context::EngineContext& eng, const context::FrameContext& frm) {
-        std::array<VkDescriptorPoolSize, 11> pool_sizes{{
-            {VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
-            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
-            {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000},
-            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000},
-            {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000},
-            {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000},
-            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000},
-            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
-            {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000},
-        }};
-        VkDescriptorPoolCreateInfo pool_info{
+        constexpr std::array pool_sizes{
+            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
+            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
+            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000},
+            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000},
+            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000},
+            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000},
+            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
+            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000},
+            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000},
+            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
+            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}
+        };
+
+        const VkDescriptorPoolCreateInfo pool_info{
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
             .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
             .maxSets = 1000u * static_cast<uint32_t>(pool_sizes.size()),
             .poolSizeCount = static_cast<uint32_t>(pool_sizes.size()),
-            .pPoolSizes = pool_sizes.data(),
+            .pPoolSizes = pool_sizes.data()
         };
-        VK_CHECK(vkCreateDescriptorPool(eng.device, &pool_info, nullptr, &eng.descriptor_allocator.pool));
+
+        vk_check(vkCreateDescriptorPool(eng.device, &pool_info, nullptr, &eng.descriptor_allocator.pool),
+                 "Failed to create descriptor pool");
 
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
-        ImGuiIO& io = ImGui::GetIO();
+        auto& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
         io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
         ImGui::StyleColorsDark();
 
         if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-            ImGuiStyle& style = ImGui::GetStyle();
+            auto& style = ImGui::GetStyle();
             style.WindowRounding = 0.0f;
             style.Colors[ImGuiCol_WindowBg].w = 1.0f;
         }
 
         if (!ImGui_ImplSDL3_InitForVulkan(eng.window)) {
-            throw std::runtime_error("Failed to initialize ImGui SDL3 backend.");
+            throw std::runtime_error("Failed to initialize ImGui SDL3 backend");
         }
 
         ImGui_ImplVulkan_InitInfo init_info{};
@@ -254,25 +277,29 @@ namespace vk::plugins {
         init_info.MinImageCount = context::FRAME_OVERLAP;
         init_info.ImageCount = context::FRAME_OVERLAP;
         init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-        init_info.CheckVkResultFn = [](VkResult res) { VK_CHECK(res); };
         init_info.UseDynamicRendering = VK_TRUE;
+        init_info.CheckVkResultFn = [](const VkResult res) { vk_check(res, "ImGui Vulkan operation"); };
 
         VkPipelineRenderingCreateInfo rendering_info{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
             .colorAttachmentCount = 1,
-            .pColorAttachmentFormats = &frm.swapchain_format,
+            .pColorAttachmentFormats = &frm.swapchain_format
         };
+
         init_info.PipelineRenderingCreateInfo = rendering_info;
 
         if (!ImGui_ImplVulkan_Init(&init_info)) {
-            throw std::runtime_error("Failed to initialize ImGui Vulkan backend.");
+            throw std::runtime_error("Failed to initialize ImGui Vulkan backend");
         }
+
+        log_success(name(), "ImGui initialized → docking enabled");
     }
 
-    void Viewport3DPlugin::destroy_imgui(const context::EngineContext& eng) {
+    void Viewport3DPlugin::destroy_imgui(const context::EngineContext& /*eng*/) const {
         ImGui_ImplVulkan_Shutdown();
         ImGui_ImplSDL3_Shutdown();
         ImGui::DestroyContext();
+        log_info(name(), "ImGui destroyed");
     }
 
     void Viewport3DPlugin::render_imgui(VkCommandBuffer& cmd, const context::FrameContext& frm) {
@@ -288,7 +315,6 @@ namespace vk::plugins {
 
         ImGui::Render();
 
-        // Render to target
         VkImage target_image = VK_NULL_HANDLE;
         VkImageView target_view = VK_NULL_HANDLE;
 
@@ -305,32 +331,33 @@ namespace vk::plugins {
         }
 
         if (target_image != VK_NULL_HANDLE && target_view != VK_NULL_HANDLE) {
-            VkRenderingAttachmentInfo color_attachment{
+            const VkRenderingAttachmentInfo color_attachment{
                 .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
                 .imageView = target_view,
                 .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                 .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE
             };
-            VkRenderingInfo rendering_info{
+
+            const VkRenderingInfo rendering_info{
                 .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
                 .renderArea = {{0, 0}, frm.extent},
-                .layerCount = 1u,
-                .colorAttachmentCount = 1u,
-                .pColorAttachments = &color_attachment,
+                .layerCount = 1,
+                .colorAttachmentCount = 1,
+                .pColorAttachments = &color_attachment
             };
+
             vkCmdBeginRendering(cmd, &rendering_info);
             ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
             vkCmdEndRendering(cmd);
 
-            ImGuiIO& io = ImGui::GetIO();
-            if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+            if (const auto& io = ImGui::GetIO(); io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
                 ImGui::UpdatePlatformWindows();
                 ImGui::RenderPlatformWindowsDefault();
             }
 
             if (frm.presentation_mode != context::PresentationMode::DirectToSwapchain) {
-                VkImageMemoryBarrier2 barrier{
+                const VkImageMemoryBarrier2 barrier{
                     .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
                     .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                     .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
@@ -339,13 +366,15 @@ namespace vk::plugins {
                     .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                     .newLayout = VK_IMAGE_LAYOUT_GENERAL,
                     .image = target_image,
-                    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u},
+                    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
                 };
-                VkDependencyInfo dep{
+
+                const VkDependencyInfo dep{
                     .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                    .imageMemoryBarrierCount = 1u,
-                    .pImageMemoryBarriers = &barrier,
+                    .imageMemoryBarrierCount = 1,
+                    .pImageMemoryBarriers = &barrier
                 };
+
                 vkCmdPipelineBarrier2(cmd, &dep);
             }
         }
@@ -355,10 +384,9 @@ namespace vk::plugins {
         ImGui::Begin("Camera Controls", &show_camera_panel_);
 
         auto state = camera_.state();
-        bool changed = false;
+        auto changed = false;
 
-        // Mode selection
-        int mode = static_cast<int>(state.mode);
+        const auto mode = static_cast<int>(state.mode);
         if (ImGui::RadioButton("Orbit Mode", mode == 0)) {
             state.mode = camera::CameraMode::Orbit;
             changed = true;
@@ -410,19 +438,19 @@ namespace vk::plugins {
     }
 
     void Viewport3DPlugin::draw_mini_axis_gizmo() const {
-        ImGuiViewport* viewport = ImGui::GetMainViewport();
+        auto* viewport = ImGui::GetMainViewport();
         if (!viewport) return;
 
-        ImDrawList* draw_list = ImGui::GetForegroundDrawList(viewport);
+        auto* draw_list = ImGui::GetForegroundDrawList(viewport);
         if (!draw_list) return;
 
-        constexpr float size = 80.0f;
-        constexpr float margin = 16.0f;
+        constexpr auto size = 80.0f;
+        constexpr auto margin = 16.0f;
         const ImVec2 center(
             viewport->Pos.x + viewport->Size.x - margin - size * 0.5f,
             viewport->Pos.y + margin + size * 0.5f
         );
-        const float radius = size * 0.42f;
+        constexpr auto radius = size * 0.42f;
 
         draw_list->AddCircleFilled(center, size * 0.5f, IM_COL32(30, 32, 36, 180), 48);
         draw_list->AddCircle(center, size * 0.5f, IM_COL32(255, 255, 255, 60), 48, 1.5f);
@@ -435,10 +463,10 @@ namespace vk::plugins {
             const char* label;
         };
 
-        const AxisInfo axes[3] = {
-            {{1, 0, 0}, IM_COL32(255, 80, 80, 255), "X"},
-            {{0, 1, 0}, IM_COL32(80, 255, 80, 255), "Y"},
-            {{0, 0, 1}, IM_COL32(100, 140, 255, 255), "Z"}
+        constexpr std::array axes{
+            AxisInfo{{1, 0, 0}, IM_COL32(255, 80, 80, 255), "X"},
+            AxisInfo{{0, 1, 0}, IM_COL32(80, 255, 80, 255), "Y"},
+            AxisInfo{{0, 0, 1}, IM_COL32(100, 140, 255, 255), "Z"}
         };
 
         struct TransformedAxis {
@@ -446,10 +474,10 @@ namespace vk::plugins {
             AxisInfo info;
         };
 
-        TransformedAxis transformed[3];
-        for (int i = 0; i < 3; ++i) {
+        std::array<TransformedAxis, 3> transformed{};
+        for (size_t i = 0; i < 3; ++i) {
             const auto& dir = axes[i].direction;
-            camera::Vec3 view_dir{
+            const camera::Vec3 view_dir{
                 view.m[0] * dir.x + view.m[4] * dir.y + view.m[8] * dir.z,
                 view.m[1] * dir.x + view.m[5] * dir.y + view.m[9] * dir.z,
                 view.m[2] * dir.x + view.m[6] * dir.y + view.m[10] * dir.z
@@ -457,10 +485,10 @@ namespace vk::plugins {
             transformed[i] = {view_dir, axes[i]};
         }
 
-        auto draw_axis = [&](const TransformedAxis& axis, bool is_back) {
-            const float thickness = is_back ? 2.0f : 3.0f;
-            const ImU32 base_color = axis.info.color;
-            const ImU32 color = is_back
+        const auto draw_axis = [&](const TransformedAxis& axis, const bool is_back) {
+            const auto thickness = is_back ? 2.0f : 3.0f;
+            const auto base_color = axis.info.color;
+            const auto color = is_back
                 ? IM_COL32(
                     (base_color >> IM_COL32_R_SHIFT) & 0xFF,
                     (base_color >> IM_COL32_G_SHIFT) & 0xFF,
@@ -474,12 +502,12 @@ namespace vk::plugins {
             );
 
             draw_list->AddLine(center, end_point, color, thickness);
-            const float circle_radius = is_back ? 3.0f : 4.5f;
+            const auto circle_radius = is_back ? 3.0f : 4.5f;
             draw_list->AddCircleFilled(end_point, circle_radius, color, 12);
 
             if (!is_back) {
-                const float label_offset_x = axis.view_dir.x >= 0 ? 8.0f : -20.0f;
-                const float label_offset_y = axis.view_dir.y >= 0 ? -18.0f : 4.0f;
+                const auto label_offset_x = axis.view_dir.x >= 0 ? 8.0f : -20.0f;
+                const auto label_offset_y = axis.view_dir.y >= 0 ? -18.0f : 4.0f;
                 const ImVec2 label_pos(
                     end_point.x + label_offset_x,
                     end_point.y + label_offset_y
@@ -501,28 +529,21 @@ namespace vk::plugins {
         }
     }
 
-    // ============================================================================
-    // Screenshot Plugin Implementation
-    // ============================================================================
-
-    engine::PluginPhase ScreenshotPlugin::phases() const {
+    engine::PluginPhase ScreenshotPlugin::phases() const noexcept {
         return engine::PluginPhase::Initialize |
                engine::PluginPhase::PreRender |
                engine::PluginPhase::Present |
                engine::PluginPhase::Cleanup;
     }
 
-    void ScreenshotPlugin::on_initialize(engine::PluginContext& ctx) {
-        std::println("[{}] Initialized - Ready to capture screenshots (F1 to capture)", name());
+    void ScreenshotPlugin::on_initialize(engine::PluginContext& /*ctx*/) {
+        log_success(name(), "Initialized → Press F1 to capture");
     }
 
     void ScreenshotPlugin::on_pre_render(engine::PluginContext& ctx) {
-        // Process pending screenshot from previous frame
         if (pending_capture_.buffer != VK_NULL_HANDLE && ctx.engine) {
-            // Wait for GPU to complete
             vkQueueWaitIdle(ctx.engine->graphics_queue);
 
-            // Map buffer and save screenshot
             void* pixel_data = nullptr;
             vmaMapMemory(ctx.engine->allocator, pending_capture_.allocation, &pixel_data);
 
@@ -537,7 +558,6 @@ namespace vk::plugins {
                 vmaUnmapMemory(ctx.engine->allocator, pending_capture_.allocation);
             }
 
-            // Cleanup buffer
             vmaDestroyBuffer(ctx.engine->allocator, pending_capture_.buffer, pending_capture_.allocation);
             pending_capture_ = {};
         }
@@ -546,19 +566,17 @@ namespace vk::plugins {
     void ScreenshotPlugin::on_present(engine::PluginContext& ctx) {
         if (!screenshot_requested_) return;
 
-        // Capture the current frame
-        const uint32_t image_index = ctx.frame->image_index;
+        const auto image_index = ctx.frame->image_index;
         capture_swapchain(ctx, image_index);
         screenshot_requested_ = false;
     }
 
     void ScreenshotPlugin::on_cleanup(engine::PluginContext& ctx) {
-        // Clean up any pending capture resources
         if (pending_capture_.buffer != VK_NULL_HANDLE && ctx.engine) {
             vmaDestroyBuffer(ctx.engine->allocator, pending_capture_.buffer, pending_capture_.allocation);
             pending_capture_ = {};
         }
-        std::println("[{}] Cleanup complete", name());
+        log_success(name(), "Cleanup complete");
     }
 
     void ScreenshotPlugin::on_event(const SDL_Event& event) {
@@ -569,7 +587,7 @@ namespace vk::plugins {
 
     void ScreenshotPlugin::request_screenshot() {
         screenshot_requested_ = true;
-        std::println("[{}] Screenshot requested", name());
+        log_info(name(), "Screenshot requested");
     }
 
     void ScreenshotPlugin::request_screenshot(const ScreenshotConfig& config) {
@@ -577,44 +595,41 @@ namespace vk::plugins {
         request_screenshot();
     }
 
-    void ScreenshotPlugin::capture_swapchain(engine::PluginContext& ctx, uint32_t image_index) {
+    void ScreenshotPlugin::capture_swapchain(engine::PluginContext& ctx, const uint32_t /*image_index*/) {
         if (!ctx.engine || !ctx.cmd || !ctx.frame) return;
 
-        // Get swapchain image info
-        const uint32_t w = ctx.frame->extent.width;
-        const uint32_t h = ctx.frame->extent.height;
-        VkImage img = ctx.frame->swapchain_image;
+        const auto width = ctx.frame->extent.width;
+        const auto height = ctx.frame->extent.height;
+        const auto img = ctx.frame->swapchain_image;
 
         if (img == VK_NULL_HANDLE) {
-            std::println("[{}] Error: Invalid swapchain image", name());
+            log_error(name(), "Invalid swapchain image");
             return;
         }
 
-        // Calculate buffer size
-        const VkDeviceSize buffer_size = static_cast<VkDeviceSize>(w) * static_cast<VkDeviceSize>(h) * 4u;
+        const auto buffer_size = static_cast<VkDeviceSize>(width) * static_cast<VkDeviceSize>(height) * 4u;
 
-        // Create staging buffer
         VkBuffer buffer = VK_NULL_HANDLE;
         VmaAllocation alloc{};
         VmaAllocationInfo alloc_info{};
 
-        VkBufferCreateInfo buffer_ci{
+        const VkBufferCreateInfo buffer_ci{
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .size = buffer_size,
             .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE
         };
 
-        VmaAllocationCreateInfo alloc_ci{
+        constexpr VmaAllocationCreateInfo alloc_ci{
             .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
             .usage = VMA_MEMORY_USAGE_AUTO,
             .requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
         };
 
-        VK_CHECK(vmaCreateBuffer(ctx.engine->allocator, &buffer_ci, &alloc_ci, &buffer, &alloc, &alloc_info));
+        vk_check(vmaCreateBuffer(ctx.engine->allocator, &buffer_ci, &alloc_ci, &buffer, &alloc, &alloc_info),
+                 "Failed to create screenshot buffer");
 
-        // Transition image to transfer source
-        VkImageMemoryBarrier2 to_src{
+        const VkImageMemoryBarrier2 to_src{
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
             .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
             .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
@@ -626,7 +641,7 @@ namespace vk::plugins {
             .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
         };
 
-        VkDependencyInfo dep_to_src{
+        const VkDependencyInfo dep_to_src{
             .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
             .imageMemoryBarrierCount = 1,
             .pImageMemoryBarriers = &to_src
@@ -634,20 +649,18 @@ namespace vk::plugins {
 
         vkCmdPipelineBarrier2(*ctx.cmd, &dep_to_src);
 
-        // Copy image to buffer
-        VkBufferImageCopy region{
+        const VkBufferImageCopy region{
             .bufferOffset = 0,
             .bufferRowLength = 0,
             .bufferImageHeight = 0,
             .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
             .imageOffset = {0, 0, 0},
-            .imageExtent = {w, h, 1}
+            .imageExtent = {width, height, 1}
         };
 
         vkCmdCopyImageToBuffer(*ctx.cmd, img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &region);
 
-        // Transition image back to present
-        VkImageMemoryBarrier2 back_present{
+        const VkImageMemoryBarrier2 back_present{
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
             .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
             .srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
@@ -659,7 +672,7 @@ namespace vk::plugins {
             .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
         };
 
-        VkDependencyInfo dep_back{
+        const VkDependencyInfo dep_back{
             .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
             .imageMemoryBarrierCount = 1,
             .pImageMemoryBarriers = &back_present
@@ -667,34 +680,33 @@ namespace vk::plugins {
 
         vkCmdPipelineBarrier2(*ctx.cmd, &dep_back);
 
-        // Store capture data for processing after frame submission
-        pending_capture_ = {buffer, alloc, w, h, generate_filename()};
+        pending_capture_ = {buffer, alloc, width, height, generate_filename()};
 
-        std::println("[{}] Screenshot capture queued", name());
+        log_info(name(), std::format("Capture queued → {}x{}", width, height));
     }
 
-    void ScreenshotPlugin::save_screenshot(void* pixel_data, uint32_t width, uint32_t height, const std::string& path) {
+    void ScreenshotPlugin::save_screenshot(void* pixel_data, const uint32_t width, const uint32_t height,
+                                           const std::string& path) const {
         if (!pixel_data) return;
 
-        const uint8_t* bgra = static_cast<const uint8_t*>(pixel_data);
-        std::vector<uint8_t> rgba;
-        rgba.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 4ull);
+        const auto* bgra = static_cast<const uint8_t*>(pixel_data);
+        std::vector<uint8_t> rgba(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
 
-        // Convert BGRA to RGBA
         for (size_t i = 0, n = static_cast<size_t>(width) * static_cast<size_t>(height); i < n; ++i) {
-            rgba[i * 4 + 0] = bgra[i * 4 + 2];  // R
-            rgba[i * 4 + 1] = bgra[i * 4 + 1];  // G
-            rgba[i * 4 + 2] = bgra[i * 4 + 0];  // B
-            rgba[i * 4 + 3] = bgra[i * 4 + 3];  // A
+            rgba[i * 4 + 0] = bgra[i * 4 + 2];
+            rgba[i * 4 + 1] = bgra[i * 4 + 1];
+            rgba[i * 4 + 2] = bgra[i * 4 + 0];
+            rgba[i * 4 + 3] = bgra[i * 4 + 3];
         }
 
-        // Save based on format
         switch (config_.format) {
         case ScreenshotFormat::PNG:
-            stbi_write_png(path.c_str(), static_cast<int>(width), static_cast<int>(height), 4, rgba.data(), static_cast<int>(width) * 4);
+            stbi_write_png(path.c_str(), static_cast<int>(width), static_cast<int>(height), 4,
+                          rgba.data(), static_cast<int>(width) * 4);
             break;
         case ScreenshotFormat::JPG:
-            stbi_write_jpg(path.c_str(), static_cast<int>(width), static_cast<int>(height), 4, rgba.data(), config_.jpeg_quality);
+            stbi_write_jpg(path.c_str(), static_cast<int>(width), static_cast<int>(height), 4,
+                          rgba.data(), config_.jpeg_quality);
             break;
         case ScreenshotFormat::BMP:
             stbi_write_bmp(path.c_str(), static_cast<int>(width), static_cast<int>(height), 4, rgba.data());
@@ -704,15 +716,14 @@ namespace vk::plugins {
             break;
         }
 
-        std::println("[{}] Screenshot saved: {}", name(), path);
+        log_success(name(), std::format("Saved → {}", path));
     }
 
     std::string ScreenshotPlugin::generate_filename() const {
         if (!config_.auto_filename) {
-            return config_.output_directory + "/" + config_.filename_prefix;
+            return std::format("{}/{}", config_.output_directory, config_.filename_prefix);
         }
 
-        // Generate timestamp-based filename
         const auto now = std::chrono::system_clock::now();
         const auto time_t_now = std::chrono::system_clock::to_time_t(now);
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
@@ -730,7 +741,6 @@ namespace vk::plugins {
             << std::put_time(&tm, "%Y%m%d_%H%M%S") << "_"
             << std::setfill('0') << std::setw(3) << ms.count();
 
-        // Add extension based on format
         switch (config_.format) {
         case ScreenshotFormat::PNG: oss << ".png"; break;
         case ScreenshotFormat::JPG: oss << ".jpg"; break;
@@ -740,5 +750,5 @@ namespace vk::plugins {
 
         return oss.str();
     }
+}
 
-} // namespace vk::plugins

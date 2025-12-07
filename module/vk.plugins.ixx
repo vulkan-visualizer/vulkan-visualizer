@@ -10,99 +10,76 @@ import vk.context;
 import vk.camera;
 
 namespace vk::plugins {
-    // ============================================================================
-    // Built-in 3D Viewport Plugin
-    // ============================================================================
-    // This plugin provides a complete 3D viewport with:
-    // - Camera system (orbit/fly modes)
-    // - ImGui UI integration
-    // - Axis gizmo overlay
-    // - Pure viewport (no built-in 3D objects)
-    // ============================================================================
-
     export class Viewport3DPlugin {
     public:
         Viewport3DPlugin();
         ~Viewport3DPlugin() = default;
+        Viewport3DPlugin(const Viewport3DPlugin&) = delete;
+        Viewport3DPlugin& operator=(const Viewport3DPlugin&) = delete;
+        Viewport3DPlugin(Viewport3DPlugin&&) noexcept = default;
+        Viewport3DPlugin& operator=(Viewport3DPlugin&&) noexcept = default;
 
-        // Plugin metadata (required by CPlugin concept)
-        const char* name() const { return "3D Viewport"; }
-        const char* description() const { return "Built-in 3D viewport with camera"; }
-        uint32_t version() const { return 1; }
-        engine::PluginPhase phases() const;
-        int32_t priority() const { return 100; }  // High priority for built-in plugin
+        [[nodiscard]] static constexpr const char* name() noexcept { return "Viewport3D"; }
+        [[nodiscard]] static constexpr const char* description() noexcept { return "3D viewport with camera"; }
+        [[nodiscard]] static constexpr uint32_t version() noexcept { return 1; }
+        [[nodiscard]] static constexpr int32_t priority() noexcept { return 100; }
+        [[nodiscard]] engine::PluginPhase phases() const noexcept;
 
-        // Lifecycle (required by CPlugin concept)
-        bool is_enabled() const { return enabled_; }
-        void set_enabled(bool enabled) { enabled_ = enabled; }
+        [[nodiscard]] bool is_enabled() const noexcept { return enabled_; }
+        void set_enabled(const bool enabled) noexcept { enabled_ = enabled; }
 
-        // Phase callbacks (required by CPlugin concept)
         void on_setup(engine::PluginContext& ctx);
         void on_initialize(engine::PluginContext& ctx);
         void on_pre_render(engine::PluginContext& ctx);
         void on_render(engine::PluginContext& ctx);
         void on_post_render(engine::PluginContext& ctx);
-        void on_present(engine::PluginContext& ctx) {}
+        void on_present(engine::PluginContext& /*ctx*/) const noexcept {}
         void on_cleanup(engine::PluginContext& ctx);
         void on_event(const SDL_Event& event);
-        void on_resize(uint32_t width, uint32_t height);
+        void on_resize(uint32_t width, uint32_t height) noexcept;
 
-        // Plugin-specific API
-        camera::Camera& get_camera() { return camera_; }
-        const camera::Camera& get_camera() const { return camera_; }
+        [[nodiscard]] camera::Camera& get_camera() noexcept { return camera_; }
+        [[nodiscard]] const camera::Camera& get_camera() const noexcept { return camera_; }
 
     private:
-        // Rendering subsystem
         static void begin_rendering(VkCommandBuffer& cmd, const context::AttachmentView& target, VkExtent2D extent);
-        static void end_rendering(VkCommandBuffer& cmd);
+        static void end_rendering(VkCommandBuffer& cmd) noexcept;
 
-        // UI subsystem
         void create_imgui(context::EngineContext& eng, const context::FrameContext& frm);
-        void destroy_imgui(const context::EngineContext& eng);
+        void destroy_imgui(const context::EngineContext& eng) const;
         void render_imgui(VkCommandBuffer& cmd, const context::FrameContext& frm);
         void draw_camera_panel();
         void draw_mini_axis_gizmo() const;
 
-    private:
         bool enabled_{true};
-
-        // Camera
         camera::Camera camera_;
         int viewport_width_{1920};
         int viewport_height_{1280};
         uint64_t last_time_ms_{0};
-
-        // UI
         bool show_camera_panel_{true};
         bool show_demo_window_{true};
     };
 
-    // ============================================================================
-    // Screenshot Plugin - Built-in
-    // ============================================================================
-    // Modern screenshot capture system with multiple formats and quality options
-    // ============================================================================
-
-    export enum class ScreenshotFormat {
-        PNG,        // Lossless, compressed
-        JPG,        // Lossy, smaller size
-        BMP,        // Uncompressed
-        TGA         // Uncompressed with alpha
+    export enum class ScreenshotFormat : uint8_t {
+        PNG,
+        JPG,
+        BMP,
+        TGA
     };
 
-    export enum class ScreenshotSource {
-        Swapchain,      // Capture final swapchain image
-        Offscreen,      // Capture offscreen render target
-        HighRes         // Render at higher resolution (future)
+    export enum class ScreenshotSource : uint8_t {
+        Swapchain,
+        Offscreen,
+        HighRes
     };
 
     export struct ScreenshotConfig {
         ScreenshotFormat format{ScreenshotFormat::PNG};
         ScreenshotSource source{ScreenshotSource::Swapchain};
-        int jpeg_quality{95};           // 1-100 for JPEG
-        bool include_alpha{true};        // For formats that support it
-        bool auto_filename{true};        // Generate timestamp-based filename
-        std::string output_directory{"."}; // Output directory
+        int jpeg_quality{95};
+        bool include_alpha{true};
+        bool auto_filename{true};
+        std::string output_directory{"."};
         std::string filename_prefix{"screenshot"};
     };
 
@@ -110,46 +87,44 @@ namespace vk::plugins {
     public:
         ScreenshotPlugin() = default;
         ~ScreenshotPlugin() = default;
+        ScreenshotPlugin(const ScreenshotPlugin&) = delete;
+        ScreenshotPlugin& operator=(const ScreenshotPlugin&) = delete;
+        ScreenshotPlugin(ScreenshotPlugin&&) noexcept = default;
+        ScreenshotPlugin& operator=(ScreenshotPlugin&&) noexcept = default;
 
-        // Plugin metadata (required by CPlugin concept)
-        const char* name() const { return "Screenshot"; }
-        const char* description() const { return "Screenshot capture system"; }
-        uint32_t version() const { return 1; }
-        engine::PluginPhase phases() const;
-        int32_t priority() const { return 50; }
+        [[nodiscard]] static constexpr const char* name() noexcept { return "Screenshot"; }
+        [[nodiscard]] static constexpr const char* description() noexcept { return "Screenshot capture system"; }
+        [[nodiscard]] static constexpr uint32_t version() noexcept { return 1; }
+        [[nodiscard]] static constexpr int32_t priority() noexcept { return 50; }
+        [[nodiscard]] engine::PluginPhase phases() const noexcept;
 
-        // Lifecycle (required by CPlugin concept)
-        bool is_enabled() const { return enabled_; }
-        void set_enabled(bool enabled) { enabled_ = enabled; }
+        [[nodiscard]] bool is_enabled() const noexcept { return enabled_; }
+        void set_enabled(const bool enabled) noexcept { enabled_ = enabled; }
 
-        // Phase callbacks (required by CPlugin concept)
-        void on_setup(engine::PluginContext& ctx) {}
+        void on_setup(engine::PluginContext& /*ctx*/) const noexcept {}
         void on_initialize(engine::PluginContext& ctx);
         void on_pre_render(engine::PluginContext& ctx);
-        void on_render(engine::PluginContext& ctx) {}
-        void on_post_render(engine::PluginContext& ctx) {}
+        void on_render(engine::PluginContext& /*ctx*/) const noexcept {}
+        void on_post_render(engine::PluginContext& /*ctx*/) const noexcept {}
         void on_present(engine::PluginContext& ctx);
         void on_cleanup(engine::PluginContext& ctx);
         void on_event(const SDL_Event& event);
-        void on_resize(uint32_t width, uint32_t height) {}
+        void on_resize(uint32_t /*width*/, uint32_t /*height*/) const noexcept {}
 
-        // Plugin-specific API
         void request_screenshot();
         void request_screenshot(const ScreenshotConfig& config);
         void set_config(const ScreenshotConfig& config) { config_ = config; }
-        const ScreenshotConfig& get_config() const { return config_; }
+        [[nodiscard]] const ScreenshotConfig& get_config() const noexcept { return config_; }
 
     private:
         void capture_swapchain(engine::PluginContext& ctx, uint32_t image_index);
-        void save_screenshot(void* pixel_data, uint32_t width, uint32_t height, const std::string& path);
-        std::string generate_filename() const;
+        void save_screenshot(void* pixel_data, uint32_t width, uint32_t height, const std::string& path) const;
+        [[nodiscard]] std::string generate_filename() const;
 
-    private:
         bool enabled_{true};
         bool screenshot_requested_{false};
         ScreenshotConfig config_;
 
-        // Capture state
         struct CaptureData {
             VkBuffer buffer{VK_NULL_HANDLE};
             VmaAllocation allocation{};
