@@ -122,6 +122,7 @@ target_sources(vk_vis
         PRIVATE
         src/vk.engine.cpp
         src/vk.context.cpp
+        src/vk.camera.cpp
         ${_VK_BOOTSTRAP_SOURCES}
         ${_VMA_IMPL}
         ${_STB_IMPL}
