@@ -68,7 +68,28 @@ file(WRITE "${_VMA_IMPL}" [[
 #endif
 ]])
 
-FetchContent_MakeAvailable(SDL3 vk_bootstrap VMA_src)
+FetchContent_Declare(stb
+        GIT_REPOSITORY https://github.com/nothings/stb.git
+        GIT_TAG master
+        GIT_SHALLOW TRUE
+)
+
+set(_STB_IMPL "${CMAKE_CURRENT_BINARY_DIR}/stb_impl.cpp")
+file(WRITE "${_STB_IMPL}" [[
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4100 4127 4189 4244 4365 4514 4820 4996)
+#endif
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+]])
+
+FetchContent_MakeAvailable(SDL3 vk_bootstrap VMA_src stb)
 
 
 # ============================================================================
@@ -82,6 +103,7 @@ target_sources(vk_vis
         src/vk.context.cpp
         ${vk_bootstrap_SOURCE_DIR}/src/VkBootstrap.cpp
         ${_VMA_IMPL}
+        ${_STB_IMPL}
         PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
         module/vk.engine.ixx
         module/vk.context.ixx
@@ -93,7 +115,8 @@ elseif (TARGET SDL3::SDL3)
     target_link_libraries(vk_vis PUBLIC $<BUILD_INTERFACE:SDL3::SDL3>)
 endif ()
 target_include_directories(vk_vis PRIVATE
-        $<BUILD_INTERFACE:${vk_bootstrap_SOURCE_DIR}/src>
         $<BUILD_INTERFACE:${sdl3_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${vk_bootstrap_SOURCE_DIR}/src>
         $<BUILD_INTERFACE:${vma_src_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${stb_SOURCE_DIR}>
 )

@@ -59,8 +59,8 @@ namespace vk::engine {
         void create_command_buffers();
         void destroy_command_buffers();
 
-        void begin_frame(uint32_t& imageIndex, VkCommandBuffer& cmd);
-        void end_frame(uint32_t imageIndex, VkCommandBuffer cmd);
+        void begin_frame(uint32_t& image_index, VkCommandBuffer& cmd);
+        void end_frame(uint32_t image_index, VkCommandBuffer cmd);
 
     private:
         context::FrameContext make_frame_context(uint64_t frame_index, uint32_t image_index, VkExtent2D extent);

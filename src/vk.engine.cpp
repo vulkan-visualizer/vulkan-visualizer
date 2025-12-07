@@ -163,14 +163,14 @@ void vk::engine::VulkanEngine::recreate_swapchain() {
     destroy_renderer_targets();
     int pxw = 0, pxh = 0;
     SDL_GetWindowSizeInPixels(ctx_.window, &pxw, &pxh);
-    this->state_.width = std::max(1, pxw);
+    this->state_.width  = std::max(1, pxw);
     this->state_.height = std::max(1, pxh);
     create_swapchain();
     create_renderer_targets();
     context::FrameContext frm = make_frame_context(state_.frame_number, 0u, swapchain_.swapchain_extent);
     frm.swapchain_image       = VK_NULL_HANDLE;
     frm.swapchain_image_view  = VK_NULL_HANDLE;
-    state_.resize_requested = false;
+    state_.resize_requested   = false;
 }
 void vk::engine::VulkanEngine::create_renderer_targets() {
     destroy_renderer_targets();
@@ -284,7 +284,7 @@ void vk::engine::VulkanEngine::destroy_command_buffers() {
         fr.submitted_timeline_value  = 0;
     }
 }
-void vk::engine::VulkanEngine::begin_frame(uint32_t& imageIndex, VkCommandBuffer& cmd) {
+void vk::engine::VulkanEngine::begin_frame(uint32_t& image_index, VkCommandBuffer& cmd) {
     const context::FrameData& fr = frames_[state_.frame_number % context::FRAME_OVERLAP];
     if (fr.submitted_timeline_value > 0) {
         VkSemaphore sem = render_timeline_;
@@ -292,7 +292,7 @@ void vk::engine::VulkanEngine::begin_frame(uint32_t& imageIndex, VkCommandBuffer
         const VkSemaphoreWaitInfo wi{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .pNext = nullptr, .flags = 0u, .semaphoreCount = 1u, .pSemaphores = &sem, .pValues = &val};
         VK_CHECK(vkWaitSemaphores(ctx_.device, &wi, UINT64_MAX));
     }
-    const VkResult acq = vkAcquireNextImageKHR(ctx_.device, swapchain_.swapchain, UINT64_MAX, fr.imageAcquired, VK_NULL_HANDLE, &imageIndex);
+    const VkResult acq = vkAcquireNextImageKHR(ctx_.device, swapchain_.swapchain, UINT64_MAX, fr.imageAcquired, VK_NULL_HANDLE, &image_index);
     if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
         state_.resize_requested = true;
         cmd                     = VK_NULL_HANDLE;
@@ -304,7 +304,7 @@ void vk::engine::VulkanEngine::begin_frame(uint32_t& imageIndex, VkCommandBuffer
     constexpr VkCommandBufferBeginInfo bi{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .pNext = nullptr, .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, .pInheritanceInfo = nullptr};
     VK_CHECK(vkBeginCommandBuffer(cmd, &bi));
 }
-void vk::engine::VulkanEngine::end_frame(uint32_t imageIndex, VkCommandBuffer cmd) {
+void vk::engine::VulkanEngine::end_frame(uint32_t image_index, VkCommandBuffer cmd) {
     VK_CHECK(vkEndCommandBuffer(cmd));
     context::FrameData& fr = frames_[state_.frame_number % context::FRAME_OVERLAP];
     VkCommandBufferSubmitInfo cbsi{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .pNext = nullptr, .commandBuffer = cmd, .deviceMask = 0u};
@@ -323,7 +323,7 @@ void vk::engine::VulkanEngine::end_frame(uint32_t imageIndex, VkCommandBuffer cm
     const VkSubmitInfo2 si{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2, .pNext = nullptr, .waitSemaphoreInfoCount = waitCount, .pWaitSemaphoreInfos = waitInfos, .commandBufferInfoCount = 1, .pCommandBufferInfos = &cbsi, .signalSemaphoreInfoCount = 2u, .pSignalSemaphoreInfos = signalInfos};
     VK_CHECK(vkQueueSubmit2(ctx_.graphics_queue, 1, &si, VK_NULL_HANDLE));
     fr.submitted_timeline_value = timeline_to_signal;
-    const VkPresentInfoKHR pi{.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, .pNext = nullptr, .waitSemaphoreCount = 1u, .pWaitSemaphores = &fr.renderComplete, .swapchainCount = 1u, .pSwapchains = &swapchain_.swapchain, .pImageIndices = &imageIndex, .pResults = nullptr};
+    const VkPresentInfoKHR pi{.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, .pNext = nullptr, .waitSemaphoreCount = 1u, .pWaitSemaphores = &fr.renderComplete, .swapchainCount = 1u, .pSwapchains = &swapchain_.swapchain, .pImageIndices = &image_index, .pResults = nullptr};
     const VkResult pres = vkQueuePresentKHR(ctx_.graphics_queue, &pi);
     if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
         state_.resize_requested = true;
