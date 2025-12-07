@@ -11,7 +11,7 @@ import vk.context;
 
 namespace vk::engine {
     export template <typename T>
-    concept CRenderer = requires(T r, context::EngineContext& eng, context::FrameContext& frm, context::RendererCaps& caps, VkCommandBuffer &cmd) {
+    concept CRenderer = requires(T r, context::EngineContext& eng, context::FrameContext& frm, context::RendererCaps& caps, VkCommandBuffer& cmd) {
         { r.query_required_device_caps(caps) };
         { r.get_capabilities(caps) };
         { r.initialize(eng, caps) };
@@ -20,17 +20,24 @@ namespace vk::engine {
     };
 
     export template <typename T>
-    concept CUiSystem = requires(T r, const char* title, context::EngineContext& eng, context::FrameContext& frm, VkCommandBuffer &cmd, const SDL_Event& event, VkFormat format, uint32_t n_swapchain_image) {
+    concept CUiSystem = requires(T r, const char* title, context::EngineContext& eng, context::FrameContext& frm, VkCommandBuffer& cmd, const SDL_Event& event, VkFormat format, uint32_t n_swapchain_image) {
         { r.create_imgui(eng, format, n_swapchain_image) };
         { r.destroy_imgui(eng) };
         { r.process_event(event) };
         { r.record_imgui(cmd, frm) };
     };
 
+    export template <typename T>
+    concept CPlugin = requires(T r) {
+        { r.initialize() };
+        { r.update() };
+        { r.shutdown() };
+    };
+
     export class VulkanEngine {
     public:
-        void init(CRenderer auto& renderer, CUiSystem auto& ui_system);
-        void run(CRenderer auto& renderer, CUiSystem auto& ui_system);
+        void init(CRenderer auto& renderer, CUiSystem auto& ui_system, CPlugin auto&... plugins);
+        void run(CRenderer auto& renderer, CUiSystem auto& ui_system, CPlugin auto&... plugins);
         void cleanup();
 
         VulkanEngine()                                   = default;
@@ -84,7 +91,7 @@ namespace vk::engine {
         uint64_t timeline_value_{0};
     };
 
-    void VulkanEngine::init(CRenderer auto& renderer, CUiSystem auto& ui_system) {
+    void VulkanEngine::init(CRenderer auto& renderer, CUiSystem auto& ui_system, CPlugin auto&... plugins) {
         renderer.query_required_device_caps(renderer_caps_);
         renderer.get_capabilities(renderer_caps_);
 
@@ -93,18 +100,26 @@ namespace vk::engine {
         this->create_swapchain();
         this->create_renderer_targets();
         this->create_command_buffers();
+
         renderer.initialize(this->ctx_, this->renderer_caps_);
         mdq_.emplace_back([&] { renderer.destroy(this->ctx_); });
+
         ui_system.create_imgui(this->ctx_, swapchain_.swapchain_image_format, static_cast<uint32_t>(swapchain_.swapchain_images.size()));
         mdq_.emplace_back([&] {
             vkDeviceWaitIdle(this->ctx_.device);
             ui_system.destroy_imgui(this->ctx_);
         });
 
+        (plugins.initialize(), ...);
+        mdq_.emplace_back([&] {
+            vkDeviceWaitIdle(this->ctx_.device);
+            (plugins.shutdown(), ...);
+        });
+
         state_.initialized      = true;
         state_.should_rendering = true;
     }
-    void VulkanEngine::run(CRenderer auto& renderer, CUiSystem auto& ui_system) {
+    void VulkanEngine::run(CRenderer auto& renderer, CUiSystem auto& ui_system, CPlugin auto&... plugins) {
         if (!state_.running) state_.running = true;
         if (!state_.should_rendering) state_.should_rendering = true;
         SDL_Event e{};
@@ -150,6 +165,7 @@ namespace vk::engine {
             frData.asyncComputeSubmitted = false;
             renderer.record_graphics(cmd, this->ctx_, frm);
             ui_system.record_imgui(cmd, frm);
+            (plugins.update(), ...);
             switch (renderer_caps_.presentation_mode) {
             case context::PresentationMode::EngineBlit:
                 {
