@@ -21,7 +21,6 @@ namespace vk::engine {
 
     export template <typename T>
     concept CUiSystem = requires(T r, const char* title, context::EngineContext& eng, context::FrameContext& frm, VkCommandBuffer &cmd, const SDL_Event& event, VkFormat format, uint32_t n_swapchain_image) {
-        { r.set_main_window_title(title) };
         { r.create_imgui(eng, format, n_swapchain_image) };
         { r.destroy_imgui(eng) };
         { r.process_event(event) };
