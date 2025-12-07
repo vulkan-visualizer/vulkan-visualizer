@@ -62,6 +62,7 @@ namespace vk::engine {
         void end_frame(uint32_t image_index, VkCommandBuffer cmd);
 
         void queue_swapchain_screenshot(uint32_t image_index, VkCommandBuffer cmd);
+        void blit_offscreen_to_swapchain(uint32_t image_index, VkCommandBuffer cmd, VkExtent2D extent);
 
     private:
         context::FrameContext make_frame_context(uint64_t frame_index, uint32_t image_index, VkExtent2D extent);
@@ -177,57 +178,7 @@ namespace vk::engine {
             (plugins.update(), ...);
             switch (renderer_caps_.presentation_mode) {
             case context::PresentationMode::EngineBlit:
-                {
-                    if (renderer_caps_.presentation_mode != context::PresentationMode::EngineBlit) return;
-                    if (image_index >= swapchain_.swapchain_images.size()) return;
-                    if (presentation_attachment_index_ < 0 || presentation_attachment_index_ >= static_cast<int>(swapchain_.color_attachments.size())) return;
-                    const auto& srcAtt = swapchain_.color_attachments[static_cast<size_t>(presentation_attachment_index_)];
-                    VkImage src        = srcAtt.image.image;
-                    if (src == VK_NULL_HANDLE) return;
-                    VkImage dst = swapchain_.swapchain_images[image_index];
-                    VkImageMemoryBarrier2 barriers[2]{};
-                    barriers[0].sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-                    barriers[0].srcStageMask     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-                    barriers[0].srcAccessMask    = VK_ACCESS_2_MEMORY_WRITE_BIT;
-                    barriers[0].dstStageMask     = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-                    barriers[0].dstAccessMask    = VK_ACCESS_2_TRANSFER_READ_BIT;
-                    barriers[0].oldLayout        = VK_IMAGE_LAYOUT_GENERAL;
-                    barriers[0].newLayout        = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-                    barriers[0].image            = src;
-                    barriers[0].subresourceRange = {srcAtt.aspect, 0u, 1u, 0u, 1u};
-                    barriers[1].sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-                    barriers[1].srcStageMask     = VK_PIPELINE_STAGE_2_NONE;
-                    barriers[1].srcAccessMask    = 0u;
-                    barriers[1].dstStageMask     = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-                    barriers[1].dstAccessMask    = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-                    barriers[1].oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED;
-                    barriers[1].newLayout        = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-                    barriers[1].image            = dst;
-                    barriers[1].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u};
-                    VkDependencyInfo dep{};
-                    dep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-                    dep.imageMemoryBarrierCount = 2u;
-                    dep.pImageMemoryBarriers    = barriers;
-                    vkCmdPipelineBarrier2(cmd, &dep);
-                    VkImageBlit2 blit{};
-                    blit.sType          = VK_STRUCTURE_TYPE_IMAGE_BLIT_2;
-                    blit.srcSubresource = {srcAtt.aspect, 0, 0, 1};
-                    blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-                    blit.srcOffsets[0]  = {0, 0, 0};
-                    blit.srcOffsets[1]  = {static_cast<int32_t>(srcAtt.image.imageExtent.width), static_cast<int32_t>(srcAtt.image.imageExtent.height), 1};
-                    blit.dstOffsets[0]  = {0, 0, 0};
-                    blit.dstOffsets[1]  = {static_cast<int32_t>(frm.extent.width), static_cast<int32_t>(frm.extent.height), 1};
-                    VkBlitImageInfo2 bi{};
-                    bi.sType          = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2;
-                    bi.srcImage       = src;
-                    bi.srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-                    bi.dstImage       = dst;
-                    bi.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-                    bi.regionCount    = 1u;
-                    bi.pRegions       = &blit;
-                    bi.filter         = VK_FILTER_LINEAR;
-                    vkCmdBlitImage2(cmd, &bi);
-                };
+                this->blit_offscreen_to_swapchain(image_index, cmd, frm.extent);
                 break;
             case context::PresentationMode::RendererComposite:
             case context::PresentationMode::DirectToSwapchain:
