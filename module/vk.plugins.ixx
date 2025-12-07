@@ -13,9 +13,9 @@ namespace vk::plugins {
     // ============================================================================
     // This plugin provides a complete 3D viewport with:
     // - Camera system (orbit/fly modes)
-    // - Example 3D rendering (cube)
     // - ImGui UI integration
     // - Axis gizmo overlay
+    // - Pure viewport (no built-in 3D objects)
     // ============================================================================
 
     export class Viewport3DPlugin {
@@ -25,7 +25,7 @@ namespace vk::plugins {
 
         // Plugin metadata (required by CPlugin concept)
         const char* name() const { return "3D Viewport"; }
-        const char* description() const { return "Built-in 3D viewport with camera and rendering"; }
+        const char* description() const { return "Built-in 3D viewport with camera"; }
         uint32_t version() const { return 1; }
         engine::PluginPhase phases() const;
         int32_t priority() const { return 100; }  // High priority for built-in plugin
@@ -51,10 +51,6 @@ namespace vk::plugins {
 
     private:
         // Rendering subsystem
-        void create_pipeline_layout(const context::EngineContext& eng);
-        void create_graphics_pipeline(const context::EngineContext& eng);
-        void draw_cube(VkCommandBuffer cmd, VkExtent2D extent) const;
-
         static void begin_rendering(VkCommandBuffer& cmd, const context::AttachmentView& target, VkExtent2D extent);
         static void end_rendering(VkCommandBuffer& cmd);
 
@@ -74,28 +70,8 @@ namespace vk::plugins {
         int viewport_height_{1280};
         uint64_t last_time_ms_{0};
 
-        // Graphics pipeline
-        VkPipelineLayout layout_{VK_NULL_HANDLE};
-        VkPipeline pipeline_{VK_NULL_HANDLE};
-        VkFormat format_{VK_FORMAT_B8G8R8A8_UNORM};
-        VkDynamicState dynamic_states_[2]{};
-        VkPipelineColorBlendAttachmentState color_blend_attachment_{};
-
-        struct {
-            VkPipelineRenderingCreateInfo rendering_info;
-            VkPipelineVertexInputStateCreateInfo vertex_input_state;
-            VkPipelineInputAssemblyStateCreateInfo input_assembly_state;
-            VkPipelineViewportStateCreateInfo viewport_state;
-            VkPipelineRasterizationStateCreateInfo rasterization_state;
-            VkPipelineMultisampleStateCreateInfo multisample_state;
-            VkPipelineDepthStencilStateCreateInfo depth_stencil_state;
-            VkPipelineColorBlendStateCreateInfo color_blend_state;
-            VkPipelineDynamicStateCreateInfo dynamic_state;
-        } pipeline_state_{};
-
         // UI
         bool show_camera_panel_{true};
         bool show_demo_window_{true};
     };
 } // namespace vk::plugins
-

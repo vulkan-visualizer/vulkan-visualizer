@@ -120,23 +120,8 @@ namespace vk::plugins {
     }
 
     void Viewport3DPlugin::on_initialize(engine::PluginContext& ctx) {
-        format_ = ctx.caps->color_attachments.empty()
-            ? VK_FORMAT_B8G8R8A8_UNORM
-            : ctx.caps->color_attachments.front().format;
-
-        color_blend_attachment_ = {
-            .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                              VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
-        };
-
-        dynamic_states_[0] = VK_DYNAMIC_STATE_VIEWPORT;
-        dynamic_states_[1] = VK_DYNAMIC_STATE_SCISSOR;
-
-        create_pipeline_layout(*ctx.engine);
-        create_graphics_pipeline(*ctx.engine);
         create_imgui(*ctx.engine, *ctx.frame);
-
-        std::println("[{}] Initialized - pipeline and UI created", name());
+        std::println("[{}] Initialized - UI created", name());
     }
 
     void Viewport3DPlugin::on_pre_render(engine::PluginContext& ctx) {
@@ -153,7 +138,7 @@ namespace vk::plugins {
 
         transition_image_layout(*ctx.cmd, target, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
         begin_rendering(*ctx.cmd, target, ctx.frame->extent);
-        draw_cube(*ctx.cmd, ctx.frame->extent);
+        // Clear only - no built-in objects
         end_rendering(*ctx.cmd);
         transition_image_layout(*ctx.cmd, target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
     }
@@ -166,8 +151,6 @@ namespace vk::plugins {
         if (ctx.engine) {
             vkDeviceWaitIdle(ctx.engine->device);
             destroy_imgui(*ctx.engine);
-            vkDestroyPipeline(ctx.engine->device, pipeline_, nullptr);
-            vkDestroyPipelineLayout(ctx.engine->device, layout_, nullptr);
         }
         std::println("[{}] Cleanup complete", name());
     }
@@ -184,133 +167,6 @@ namespace vk::plugins {
     void Viewport3DPlugin::on_resize(uint32_t width, uint32_t height) {
         viewport_width_ = static_cast<int>(width);
         viewport_height_ = static_cast<int>(height);
-    }
-
-    // ============================================================================
-    // Graphics Pipeline
-    // ============================================================================
-
-    void Viewport3DPlugin::create_pipeline_layout(const context::EngineContext& eng) {
-        VkPushConstantRange push_constant{
-            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-            .offset = 0,
-            .size = sizeof(float) * 32  // 2x mat4 (mvp + model)
-        };
-
-        const VkPipelineLayoutCreateInfo lci{
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-            .pushConstantRangeCount = 1,
-            .pPushConstantRanges = &push_constant
-        };
-        VK_CHECK(vkCreatePipelineLayout(eng.device, &lci, nullptr, &layout_));
-    }
-
-    void Viewport3DPlugin::create_graphics_pipeline(const context::EngineContext& eng) {
-        VkShaderModule vs;
-        {
-            std::ifstream f("shader/viewport.vert.spv", std::ios::binary | std::ios::ate);
-            const size_t s = static_cast<size_t>(f.tellg());
-            f.seekg(0);
-            std::vector<char> d(s);
-            f.read(d.data(), static_cast<std::streamsize>(s));
-
-            VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-            ci.codeSize = d.size();
-            ci.pCode = reinterpret_cast<const uint32_t*>(d.data());
-            VK_CHECK(vkCreateShaderModule(eng.device, &ci, nullptr, &vs));
-        }
-
-        VkShaderModule fs;
-        {
-            std::ifstream f("shader/viewport.frag.spv", std::ios::binary | std::ios::ate);
-            const size_t s = static_cast<size_t>(f.tellg());
-            f.seekg(0);
-            std::vector<char> d(s);
-            f.read(d.data(), static_cast<std::streamsize>(s));
-
-            VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-            ci.codeSize = d.size();
-            ci.pCode = reinterpret_cast<const uint32_t*>(d.data());
-            VK_CHECK(vkCreateShaderModule(eng.device, &ci, nullptr, &fs));
-        }
-
-        const VkPipelineShaderStageCreateInfo stages[2] = {
-            {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = vs, .pName = "main"},
-            {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = fs, .pName = "main"},
-        };
-
-        pipeline_state_.rendering_info = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-            .colorAttachmentCount = 1,
-            .pColorAttachmentFormats = &format_,
-        };
-        pipeline_state_.vertex_input_state = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-        pipeline_state_.input_assembly_state = {.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
-        pipeline_state_.viewport_state = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1, .scissorCount = 1};
-        pipeline_state_.rasterization_state = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-            .polygonMode = VK_POLYGON_MODE_FILL,
-            .cullMode = VK_CULL_MODE_BACK_BIT,
-            .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-            .lineWidth = 1.0f,
-        };
-        pipeline_state_.multisample_state = {.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
-        pipeline_state_.depth_stencil_state = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO, .depthTestEnable = VK_FALSE, .depthWriteEnable = VK_FALSE, .depthCompareOp = VK_COMPARE_OP_LESS};
-        pipeline_state_.color_blend_state = {.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, .attachmentCount = 1, .pAttachments = &color_blend_attachment_};
-        pipeline_state_.dynamic_state = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = 2, .pDynamicStates = dynamic_states_};
-
-        VkGraphicsPipelineCreateInfo pci{
-            .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-            .pNext = &pipeline_state_.rendering_info,
-            .stageCount = 2,
-            .pStages = stages,
-            .pVertexInputState = &pipeline_state_.vertex_input_state,
-            .pInputAssemblyState = &pipeline_state_.input_assembly_state,
-            .pViewportState = &pipeline_state_.viewport_state,
-            .pRasterizationState = &pipeline_state_.rasterization_state,
-            .pMultisampleState = &pipeline_state_.multisample_state,
-            .pDepthStencilState = &pipeline_state_.depth_stencil_state,
-            .pColorBlendState = &pipeline_state_.color_blend_state,
-            .pDynamicState = &pipeline_state_.dynamic_state,
-            .layout = layout_,
-        };
-        VK_CHECK(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &pci, nullptr, &pipeline_));
-
-        vkDestroyShaderModule(eng.device, vs, nullptr);
-        vkDestroyShaderModule(eng.device, fs, nullptr);
-    }
-
-    void Viewport3DPlugin::draw_cube(VkCommandBuffer cmd, VkExtent2D extent) const {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
-
-        VkViewport viewport{
-            .width = static_cast<float>(extent.width),
-            .height = static_cast<float>(extent.height),
-            .minDepth = 0.0f,
-            .maxDepth = 1.0f,
-        };
-        vkCmdSetViewport(cmd, 0, 1, &viewport);
-
-        VkRect2D scissor{.offset = {0, 0}, .extent = extent};
-        vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-        // Compute MVP matrix
-        const auto& view = camera_.view_matrix();
-        const auto& proj = camera_.proj_matrix();
-        const auto model = camera::Mat4::identity();
-        const auto mvp = proj * view * model;
-
-        // Push constants
-        struct PushConstants {
-            float mvp[16];
-            float model[16];
-        } pc{};
-
-        std::copy(mvp.m.begin(), mvp.m.end(), pc.mvp);
-        std::copy(model.m.begin(), model.m.end(), pc.model);
-
-        vkCmdPushConstants(cmd, layout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
-        vkCmdDraw(cmd, 36, 1, 0, 0);  // 36 vertices for cube
     }
 
     void Viewport3DPlugin::begin_rendering(VkCommandBuffer& cmd, const context::AttachmentView& target, VkExtent2D extent) {
@@ -639,4 +495,3 @@ namespace vk::plugins {
     }
 
 } // namespace vk::plugins
-
