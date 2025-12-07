@@ -66,8 +66,8 @@ namespace vk::engine {
     private:
         context::FrameContext make_frame_context(uint64_t frame_index, uint32_t image_index, VkExtent2D extent);
         struct EngineState {
-            uint32_t width{1280};
-            uint32_t height{720};
+            uint32_t width{1920};
+            uint32_t height{1280};
             std::string name{"Vulkan Visualizer"};
             bool running{false};
             bool initialized{false};
