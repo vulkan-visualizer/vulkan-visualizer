@@ -306,7 +306,7 @@ namespace vk::context {
     };
 
 
-    enum class CameraMode : uint8_t { Orbit, Fly };
+    export enum class CameraMode : uint8_t { Orbit, Fly };
     enum class ProjectionMode : uint8_t { Perspective, Orthographic };
 
     export struct CameraState {
