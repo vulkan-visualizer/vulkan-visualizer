@@ -97,6 +97,9 @@ namespace vk::plugins {
         void add_batch(const GeometryBatch& batch) {
             batches_.push_back(batch);
         }
+        void visualize_normals(const bool enabled) {
+            show_face_normals_ = enabled;
+        }
 
     protected:
         void create_pipelines(const context::EngineContext& eng, VkFormat color_format, VkFormat depth_format);
@@ -123,7 +126,6 @@ namespace vk::plugins {
         VkImageLayout depth_layout_{VK_IMAGE_LAYOUT_UNDEFINED};
 
         bool show_face_normals_{false};
-
         const Camera* cam{nullptr};
     };
 } // namespace vk::plugins
