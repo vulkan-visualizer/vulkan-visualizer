@@ -1,15 +1,14 @@
 module;
 #include "vk_mem_alloc.h"
 #include <SDL3/SDL.h>
+#include <array>
 #include <format>
 #include <functional>
 #include <optional>
-#include <print>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <array>
 #include <vector>
 #include <vulkan/vulkan.h>
 export module vk.context;
@@ -28,26 +27,6 @@ namespace vk::context {
         if (result != VK_SUCCESS) {
             throw std::runtime_error(std::format("{}{}Vulkan Error{}: {} (code: {})", bold, red, reset, operation, static_cast<int>(result)));
         }
-    }
-
-    export void log_plugin(const std::string_view plugin_name, const std::string_view message, const std::string_view color = cyan) {
-        std::println("{}{}[{}]{} {}", bold, color, plugin_name, reset, message);
-    }
-
-    export void log_success(const std::string_view plugin_name, const std::string_view message) {
-        log_plugin(plugin_name, message, green);
-    }
-
-    export void log_info(const std::string_view plugin_name, const std::string_view message) {
-        log_plugin(plugin_name, message, cyan);
-    }
-
-    export void log_warning(const std::string_view plugin_name, const std::string_view message) {
-        log_plugin(plugin_name, message, yellow);
-    }
-
-    export void log_error(const std::string_view plugin_name, const std::string_view message) {
-        log_plugin(plugin_name, message, red);
     }
 
     export struct DescriptorAllocator {
@@ -236,8 +215,8 @@ namespace vk::context {
         float delta_time{0.0f};
     };
 
-    export void transition_image_layout(VkCommandBuffer& cmd, const AttachmentView& target, const VkImageLayout old_layout, const VkImageLayout new_layout);
-    export void transition_to_color_attachment(const VkCommandBuffer& cmd, const VkImage image, const VkImageLayout old_layout);
+    export void transition_image_layout(const VkCommandBuffer& cmd, const AttachmentView& target, VkImageLayout old_layout, VkImageLayout new_layout);
+    export void transition_to_color_attachment(const VkCommandBuffer& cmd, VkImage image, VkImageLayout old_layout);
 
 
     export struct Vec3 {

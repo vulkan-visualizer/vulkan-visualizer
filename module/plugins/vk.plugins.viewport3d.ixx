@@ -1,7 +1,5 @@
 module;
 #include <SDL3/SDL.h>
-#include <array>
-#include <cmath>
 #include <cstdint>
 #include <string>
 export module vk.plugins.viewport3d;

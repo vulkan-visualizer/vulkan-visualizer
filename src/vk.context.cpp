@@ -27,7 +27,7 @@ VkDescriptorSet vk::context::DescriptorAllocator::allocate(VkDevice device, VkDe
 }
 
 
-void vk::context::transition_image_layout(VkCommandBuffer &cmd, const AttachmentView& target, const VkImageLayout old_layout, const VkImageLayout new_layout) {
+void vk::context::transition_image_layout(const VkCommandBuffer &cmd, const AttachmentView& target, const VkImageLayout old_layout, const VkImageLayout new_layout) {
     const auto [src_stage, dst_stage, src_access, dst_access] = [&] {
         if (old_layout == VK_IMAGE_LAYOUT_GENERAL && new_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
             return std::tuple{VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT};

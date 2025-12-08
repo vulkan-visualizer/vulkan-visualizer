@@ -1,15 +1,11 @@
 module;
-#include <SDL3/SDL.h>
 #include <array>
 #include <backends/imgui_impl_vulkan.h>
 #include <chrono>
 #include <cmath>
 #include <fstream>
 #include <imgui.h>
-#include <iomanip>
 #include <print>
-#include <sstream>
-#include <stb_image_write.h>
 #include <stdexcept>
 #include <string>
 #include <vector>

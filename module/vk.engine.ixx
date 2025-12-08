@@ -53,14 +53,14 @@ namespace vk::engine {
         void destroy_command_buffers();
 
         void begin_frame(uint32_t& image_index, VkCommandBuffer& cmd);
-        void end_frame(uint32_t image_index, VkCommandBuffer& cmd);
+        void end_frame(uint32_t image_index, const VkCommandBuffer& cmd);
 
         void create_imgui();
-        void begin_imgui_frame();
-        void end_imgui_frame(VkCommandBuffer& cmd, context::FrameContext& frm);
-        void destroy_imgui();
+        static void begin_imgui_frame();
+        static void end_imgui_frame(const VkCommandBuffer& cmd, const context::FrameContext& frm);
+        void destroy_imgui() const;
 
-        void blit_offscreen_to_swapchain(uint32_t image_index, VkCommandBuffer& cmd, VkExtent2D extent);
+        void blit_offscreen_to_swapchain(uint32_t image_index, const VkCommandBuffer& cmd, VkExtent2D extent) const;
 
     private:
         context::FrameContext make_frame_context(uint64_t frame_index, uint32_t image_index, VkExtent2D extent);

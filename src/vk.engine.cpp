@@ -303,7 +303,7 @@ void vk::engine::VulkanEngine::begin_frame(uint32_t& image_index, VkCommandBuffe
     constexpr VkCommandBufferBeginInfo bi{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .pNext = nullptr, .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, .pInheritanceInfo = nullptr};
     context::vk_check(vkBeginCommandBuffer(cmd, &bi));
 }
-void vk::engine::VulkanEngine::end_frame(uint32_t image_index, VkCommandBuffer& cmd) {
+void vk::engine::VulkanEngine::end_frame(uint32_t image_index, const VkCommandBuffer& cmd) {
     context::vk_check(vkEndCommandBuffer(cmd));
     context::FrameData& fr = frames_[state_.frame_number % context::FRAME_OVERLAP];
     VkCommandBufferSubmitInfo cbsi{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .pNext = nullptr, .commandBuffer = cmd, .deviceMask = 0u};
@@ -335,7 +335,13 @@ void vk::engine::VulkanEngine::create_imgui() {
         VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000}, VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000}, VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000}, VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000}, VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
         VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}};
 
-    const VkDescriptorPoolCreateInfo pool_info{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT, .maxSets = 1000u * static_cast<uint32_t>(pool_sizes.size()), .poolSizeCount = static_cast<uint32_t>(pool_sizes.size()), .pPoolSizes = pool_sizes.data()};
+    const VkDescriptorPoolCreateInfo pool_info{
+        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .maxSets       = 1000u * static_cast<uint32_t>(pool_sizes.size()),
+        .poolSizeCount = static_cast<uint32_t>(pool_sizes.size()),
+        .pPoolSizes    = pool_sizes.data(),
+    };
     context::vk_check(vkCreateDescriptorPool(ctx_.device, &pool_info, nullptr, &ctx_.descriptor_allocator.pool), "Failed to create descriptor pool");
 
     IMGUI_CHECKVERSION();
@@ -383,7 +389,7 @@ void vk::engine::VulkanEngine::begin_imgui_frame() {
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
 }
-void vk::engine::VulkanEngine::end_imgui_frame(VkCommandBuffer& cmd, context::FrameContext& frm) {
+void vk::engine::VulkanEngine::end_imgui_frame(const VkCommandBuffer& cmd, const context::FrameContext& frm) {
     ImGui::Render();
 
     VkImage target_image    = VK_NULL_HANDLE;
@@ -432,14 +438,14 @@ void vk::engine::VulkanEngine::end_imgui_frame(VkCommandBuffer& cmd, context::Fr
         }
     }
 }
-void vk::engine::VulkanEngine::destroy_imgui() {
+void vk::engine::VulkanEngine::destroy_imgui() const {
     vkDeviceWaitIdle(ctx_.device);
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
 }
 
-void vk::engine::VulkanEngine::blit_offscreen_to_swapchain(uint32_t image_index, VkCommandBuffer& cmd, VkExtent2D extent) {
+void vk::engine::VulkanEngine::blit_offscreen_to_swapchain(const uint32_t image_index, const VkCommandBuffer& cmd, const VkExtent2D extent) const {
     if (renderer_caps_.presentation_mode != context::PresentationMode::EngineBlit) return;
     if (image_index >= swapchain_.swapchain_images.size()) return;
     if (presentation_attachment_index_ < 0 || presentation_attachment_index_ >= static_cast<int>(swapchain_.color_attachments.size())) return;
