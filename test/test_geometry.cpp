@@ -1,7 +1,4 @@
-#include <SDL3/SDL.h>
-#include <cmath>
-#include <vulkan/vulkan.h>
-
+#include <memory>
 import vk.engine;
 import vk.context;
 import vk.plugins.geometry;
@@ -10,8 +7,9 @@ import vk.plugins.screenshot;
 
 int main() {
     vk::engine::VulkanEngine engine;
-    vk::plugins::Viewport3D viewport;
-    vk::plugins::Geometry geometry;
+    const auto camera = std::make_shared<vk::context::Camera>();
+    vk::plugins::Viewport3D viewport(camera);
+    vk::plugins::Geometry geometry(camera);
     vk::plugins::Screenshot screenshot;
 
     vk::plugins::GeometryBatch batch{vk::plugins::GeometryType::Plane, vk::plugins::RenderMode::Filled};
@@ -23,7 +21,6 @@ int main() {
         .alpha    = 1.0f,
     });
     geometry.add_batch(batch);
-    geometry.set_camera_reference(&viewport.camera_);
 
     engine.init(viewport, geometry, screenshot);
     engine.run(viewport, geometry, screenshot);

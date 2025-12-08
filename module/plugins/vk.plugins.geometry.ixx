@@ -1,14 +1,13 @@
 module;
 #include <SDL3/SDL.h>
 #include <cstdint>
-#include <string>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 #include <vk_mem_alloc.h>
 #include <vulkan/vulkan.h>
 export module vk.plugins.geometry;
 import vk.context;
-import vk.plugins.viewport3d;
 
 namespace vk::plugins {
     export enum class GeometryType : uint8_t {
@@ -84,16 +83,13 @@ namespace vk::plugins {
         static void on_event(const SDL_Event&) {}
         void on_resize(uint32_t width, uint32_t height);
 
-        Geometry()                               = default;
+        explicit Geometry(const std::shared_ptr<context::Camera>& camera) : camera_(camera) {}
         ~Geometry()                              = default;
         Geometry(const Geometry&)                = delete;
         Geometry& operator=(const Geometry&)     = delete;
         Geometry(Geometry&&) noexcept            = default;
         Geometry& operator=(Geometry&&) noexcept = default;
 
-        void set_camera_reference(const Camera* cam) {
-            this->cam = cam;
-        }
         void add_batch(const GeometryBatch& batch) {
             batches_.push_back(batch);
         }
@@ -110,6 +106,7 @@ namespace vk::plugins {
         void render_batch(VkCommandBuffer& cmd, const GeometryBatch& batch, const InstanceBuffer& instance_buffer, const context::Mat4& view_proj);
 
     private:
+        std::shared_ptr<context::Camera> camera_{nullptr};
         std::vector<GeometryBatch> batches_{};
 
         std::unordered_map<GeometryType, GeometryMesh> geometry_meshes_{};
@@ -126,6 +123,5 @@ namespace vk::plugins {
         VkImageLayout depth_layout_{VK_IMAGE_LAYOUT_UNDEFINED};
 
         bool show_face_normals_{false};
-        const Camera* cam{nullptr};
     };
 } // namespace vk::plugins

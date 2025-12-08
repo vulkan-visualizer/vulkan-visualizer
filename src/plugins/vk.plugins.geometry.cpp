@@ -789,8 +789,7 @@ void vk::plugins::Geometry::on_render(context::PluginContext& ctx) {
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    if (cam == nullptr) throw std::runtime_error("GeometryPlugin requires a valid camera");
-    const auto view_proj = cam->proj_matrix() * cam->view_matrix();
+    const auto view_proj = camera_->proj_matrix() * camera_->view_matrix();
 
     // Render all batches with instancing
     for (size_t i = 0; i < batches_.size(); ++i) {
