@@ -36,7 +36,7 @@ namespace vk::plugins {
         void on_render(context::PluginContext& ctx);
         void on_post_render(context::PluginContext& ctx);
         void on_present(context::PluginContext& /*ctx*/) const noexcept {}
-        void on_cleanup(context::PluginContext& ctx);
+        void on_cleanup(context::PluginContext& ctx) {}
         void on_event(const SDL_Event& event);
         void on_resize(uint32_t width, uint32_t height) noexcept;
 

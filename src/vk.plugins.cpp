@@ -22,41 +22,6 @@ module vk.plugins;
 import vk.camera;
 
 namespace {
-    constexpr auto reset = "\033[0m";
-    constexpr auto bold = "\033[1m";
-    constexpr auto red = "\033[31m";
-    constexpr auto green = "\033[32m";
-    constexpr auto yellow = "\033[33m";
-    constexpr auto blue = "\033[34m";
-    constexpr auto magenta = "\033[35m";
-    constexpr auto cyan = "\033[36m";
-
-    void vk_check(const VkResult result, const char* operation) {
-        if (result != VK_SUCCESS) {
-            throw std::runtime_error(std::format("{}{}Vulkan Error{}: {} (code: {})",
-                bold, red, reset, operation, static_cast<int>(result)));
-        }
-    }
-
-    void log_plugin(const std::string_view plugin_name, const std::string_view message, const std::string_view color = cyan) {
-        std::println("{}{}[{}]{} {}", bold, color, plugin_name, reset, message);
-    }
-
-    void log_success(const std::string_view plugin_name, const std::string_view message) {
-        log_plugin(plugin_name, message, green);
-    }
-
-    void log_info(const std::string_view plugin_name, const std::string_view message) {
-        log_plugin(plugin_name, message, cyan);
-    }
-
-    void log_warning(const std::string_view plugin_name, const std::string_view message) {
-        log_plugin(plugin_name, message, yellow);
-    }
-
-    void log_error(const std::string_view plugin_name, const std::string_view message) {
-        log_plugin(plugin_name, message, red);
-    }
 
     void transition_image_layout(VkCommandBuffer cmd, const vk::context::AttachmentView& target,
                                   const VkImageLayout old_layout, const VkImageLayout new_layout) {
@@ -125,7 +90,7 @@ namespace vk::plugins {
     Viewport3DPlugin::Viewport3DPlugin() {
         camera_.home_view();
         last_time_ms_ = SDL_GetTicks();
-        log_info(name(), "Plugin created");
+        context::log_info(name(), "Plugin created");
     }
 
     context::PluginPhase Viewport3DPlugin::phases() const noexcept {
@@ -153,12 +118,12 @@ namespace vk::plugins {
         };
         ctx.caps->presentation_attachment = "color";
 
-        log_success(name(), "Setup complete: renderer configured");
+        context::log_success(name(), "Setup complete: renderer configured");
     }
 
     void Viewport3DPlugin::on_initialize(context::PluginContext& ctx) {
         create_imgui(*ctx.engine, *ctx.frame);
-        log_success(name(), "Initialized: UI ready");
+        context::log_success(name(), "Initialized: UI ready");
     }
 
     void Viewport3DPlugin::on_pre_render(context::PluginContext& ctx) {
@@ -180,14 +145,6 @@ namespace vk::plugins {
         render_imgui(*ctx.cmd, *ctx.frame);
     }
 
-    void Viewport3DPlugin::on_cleanup(context::PluginContext& ctx) {
-        if (ctx.engine) {
-            vkDeviceWaitIdle(ctx.engine->device);
-            destroy_imgui(*ctx.engine);
-        }
-        log_success(name(), "Cleanup complete");
-    }
-
     void Viewport3DPlugin::on_event(const SDL_Event& event) {
         const auto& io = ImGui::GetIO();
         if (const bool imgui_wants_input = io.WantCaptureMouse || io.WantCaptureKeyboard; !imgui_wants_input) {
@@ -198,7 +155,7 @@ namespace vk::plugins {
     void Viewport3DPlugin::on_resize(const uint32_t width, const uint32_t height) noexcept {
         viewport_width_ = static_cast<int>(width);
         viewport_height_ = static_cast<int>(height);
-        log_info(name(), std::format("Viewport resized: {}x{}", width, height));
+        context::log_info(name(), std::format("Viewport resized: {}x{}", width, height));
     }
 
     void Viewport3DPlugin::begin_rendering(VkCommandBuffer& cmd, const context::AttachmentView& target, const VkExtent2D extent) {
@@ -250,7 +207,7 @@ namespace vk::plugins {
             .pPoolSizes = pool_sizes.data()
         };
 
-        vk_check(vkCreateDescriptorPool(eng.device, &pool_info, nullptr, &eng.descriptor_allocator.pool),
+        context::vk_check(vkCreateDescriptorPool(eng.device, &pool_info, nullptr, &eng.descriptor_allocator.pool),
                  "Failed to create descriptor pool");
 
         IMGUI_CHECKVERSION();
@@ -281,7 +238,7 @@ namespace vk::plugins {
         init_info.ImageCount = context::FRAME_OVERLAP;
         init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
         init_info.UseDynamicRendering = VK_TRUE;
-        init_info.CheckVkResultFn = [](const VkResult res) { vk_check(res, "ImGui Vulkan operation"); };
+        init_info.CheckVkResultFn = [](const VkResult res) { context::vk_check(res, "ImGui Vulkan operation"); };
 
         VkPipelineRenderingCreateInfo rendering_info{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
@@ -295,14 +252,14 @@ namespace vk::plugins {
             throw std::runtime_error("Failed to initialize ImGui Vulkan backend");
         }
 
-        log_success(name(), "ImGui initialized: docking enabled");
+        context::log_success(name(), "ImGui initialized: docking enabled");
     }
 
     void Viewport3DPlugin::destroy_imgui(const context::EngineContext& /*eng*/) const {
         ImGui_ImplVulkan_Shutdown();
         ImGui_ImplSDL3_Shutdown();
         ImGui::DestroyContext();
-        log_info(name(), "ImGui destroyed");
+        context::log_info(name(), "ImGui destroyed");
     }
 
     void Viewport3DPlugin::render_imgui(VkCommandBuffer& cmd, const context::FrameContext& frm) {
@@ -540,7 +497,7 @@ namespace vk::plugins {
     }
 
     void ScreenshotPlugin::on_initialize(context::PluginContext& /*ctx*/) {
-        log_success(name(), "Initialized: Press F1 to capture");
+        context::log_success(name(), "Initialized: Press F1 to capture");
     }
 
     void ScreenshotPlugin::on_pre_render(context::PluginContext& ctx) {
@@ -579,7 +536,7 @@ namespace vk::plugins {
             vmaDestroyBuffer(ctx.engine->allocator, pending_capture_.buffer, pending_capture_.allocation);
             pending_capture_ = {};
         }
-        log_success(name(), "Cleanup complete");
+        context::log_success(name(), "Cleanup complete");
     }
 
     void ScreenshotPlugin::on_event(const SDL_Event& event) {
@@ -590,7 +547,7 @@ namespace vk::plugins {
 
     void ScreenshotPlugin::request_screenshot() {
         screenshot_requested_ = true;
-        log_info(name(), "Screenshot requested");
+        context::log_info(name(), "Screenshot requested");
     }
 
     void ScreenshotPlugin::request_screenshot(const ScreenshotConfig& config) {
@@ -606,7 +563,7 @@ namespace vk::plugins {
         const auto img = ctx.frame->swapchain_image;
 
         if (img == VK_NULL_HANDLE) {
-            log_error(name(), "Invalid swapchain image");
+            context::log_error(name(), "Invalid swapchain image");
             return;
         }
 
@@ -629,7 +586,7 @@ namespace vk::plugins {
             .requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
         };
 
-        vk_check(vmaCreateBuffer(ctx.engine->allocator, &buffer_ci, &alloc_ci, &buffer, &alloc, &alloc_info),
+        context::vk_check(vmaCreateBuffer(ctx.engine->allocator, &buffer_ci, &alloc_ci, &buffer, &alloc, &alloc_info),
                  "Failed to create screenshot buffer");
 
         const VkImageMemoryBarrier2 to_src{
@@ -685,7 +642,7 @@ namespace vk::plugins {
 
         pending_capture_ = {buffer, alloc, width, height, generate_filename()};
 
-        log_info(name(), std::format("Capture queued: {}x{}", width, height));
+        context::log_info(name(), std::format("Capture queued: {}x{}", width, height));
     }
 
     void ScreenshotPlugin::save_screenshot(void* pixel_data, const uint32_t width, const uint32_t height,
@@ -719,7 +676,7 @@ namespace vk::plugins {
             break;
         }
 
-        log_success(name(), std::format("Saved: {}", path));
+        context::log_success(name(), std::format("Saved: {}", path));
     }
 
     std::string ScreenshotPlugin::generate_filename() const {
@@ -759,7 +716,7 @@ namespace vk::plugins {
     // ============================================================================
 
     GeometryPlugin::GeometryPlugin() {
-        log_info(name(), "Plugin created");
+        context::log_info(name(), "Plugin created");
     }
 
     context::PluginPhase GeometryPlugin::phases() const noexcept {
@@ -802,7 +759,7 @@ namespace vk::plugins {
 
         create_pipelines(*ctx.engine, color_format_, depth_format_);
         create_geometry_meshes(*ctx.engine);
-        log_success(name(), "Initialized - geometry meshes and pipelines ready");
+        context::log_success(name(), "Initialized - geometry meshes and pipelines ready");
     }
 
 
@@ -908,7 +865,7 @@ namespace vk::plugins {
             destroy_geometry_meshes(*ctx.engine);
             destroy_pipelines(*ctx.engine);
         }
-        log_success(name(), "Cleanup complete");
+        context::log_success(name(), "Cleanup complete");
     }
 
     void GeometryPlugin::add_batch(const GeometryBatch& batch) {
@@ -1207,7 +1164,7 @@ namespace vk::plugins {
             };
 
             VmaAllocationInfo alloc_info{};
-            vk_check(vmaCreateBuffer(eng.allocator, &buffer_ci, &alloc_ci, &buffer, &allocation, &alloc_info),
+            context::vk_check(vmaCreateBuffer(eng.allocator, &buffer_ci, &alloc_ci, &buffer, &allocation, &alloc_info),
                      "Failed to create geometry buffer");
 
             void* mapped = nullptr;
@@ -1332,7 +1289,7 @@ namespace vk::plugins {
             };
 
             VkShaderModule module = VK_NULL_HANDLE;
-            vk_check(vkCreateShaderModule(eng.device, &create_info, nullptr, &module),
+            context::vk_check(vkCreateShaderModule(eng.device, &create_info, nullptr, &module),
                     "Failed to create shader module");
             return module;
         };
@@ -1353,7 +1310,7 @@ namespace vk::plugins {
             .pPushConstantRanges = &push_constant
         };
 
-        vk_check(vkCreatePipelineLayout(eng.device, &layout_info, nullptr, &pipeline_layout_),
+        context::vk_check(vkCreatePipelineLayout(eng.device, &layout_info, nullptr, &pipeline_layout_),
                 "Failed to create geometry pipeline layout");
 
         const VkPipelineShaderStageCreateInfo vert_stage{
@@ -1477,7 +1434,7 @@ namespace vk::plugins {
             .layout = pipeline_layout_
         };
 
-        vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &filled_pipeline_),
+        context::vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &filled_pipeline_),
                 "Failed to create filled geometry pipeline");
 
         // Create wireframe pipeline
@@ -1489,7 +1446,7 @@ namespace vk::plugins {
         wireframe_pipeline_info.pRasterizationState = &wireframe_rasterizer;
         wireframe_pipeline_info.pStages = wire_stages;
 
-        vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &wireframe_pipeline_info, nullptr, &wireframe_pipeline_),
+        context::vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &wireframe_pipeline_info, nullptr, &wireframe_pipeline_),
                 "Failed to create wireframe geometry pipeline");
 
         // Create line pipeline for LINE_LIST topology
@@ -1508,13 +1465,13 @@ namespace vk::plugins {
         line_pipeline_info.pRasterizationState = &line_rasterizer;
         line_pipeline_info.pStages = line_stages;
 
-        vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &line_pipeline_info, nullptr, &line_pipeline_),
+        context::vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &line_pipeline_info, nullptr, &line_pipeline_),
                 "Failed to create line geometry pipeline");
 
         vkDestroyShaderModule(eng.device, vert_module, nullptr);
         vkDestroyShaderModule(eng.device, frag_module, nullptr);
 
-        log_success(name(), "Pipelines created: filled, wireframe, and line modes ready");
+        context::log_success(name(), "Pipelines created: filled, wireframe, and line modes ready");
     }
 
     void GeometryPlugin::destroy_pipelines(const context::EngineContext& eng) {
@@ -1641,7 +1598,7 @@ namespace vk::plugins {
                 };
 
                 VmaAllocationInfo alloc_info{};
-                vk_check(vmaCreateBuffer(eng.allocator, &buffer_ci, &alloc_ci,
+                context::vk_check(vmaCreateBuffer(eng.allocator, &buffer_ci, &alloc_ci,
                                         &inst_buf.buffer, &inst_buf.allocation, &alloc_info),
                         "Failed to create instance buffer");
 

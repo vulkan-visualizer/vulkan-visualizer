@@ -55,6 +55,9 @@ namespace vk::engine {
         void begin_frame(uint32_t& image_index, VkCommandBuffer& cmd);
         void end_frame(uint32_t image_index, VkCommandBuffer cmd);
 
+        void create_imgui();
+        void destroy_imgui();
+
         void blit_offscreen_to_swapchain(uint32_t image_index, VkCommandBuffer cmd, VkExtent2D extent);
 
     private:

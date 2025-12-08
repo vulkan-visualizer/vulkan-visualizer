@@ -1,9 +1,12 @@
 module;
 #include "vk_mem_alloc.h"
 #include <SDL3/SDL.h>
+#include <format>
 #include <functional>
 #include <optional>
+#include <print>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -11,6 +14,41 @@ module;
 export module vk.context;
 
 namespace vk::context {
+    constexpr auto reset   = "\033[0m";
+    constexpr auto bold    = "\033[1m";
+    constexpr auto red     = "\033[31m";
+    constexpr auto green   = "\033[32m";
+    constexpr auto yellow  = "\033[33m";
+    constexpr auto blue    = "\033[34m";
+    constexpr auto magenta = "\033[35m";
+    constexpr auto cyan    = "\033[36m";
+
+    export void vk_check(const VkResult result, const char* operation = "") {
+        if (result != VK_SUCCESS) {
+            throw std::runtime_error(std::format("{}{}Vulkan Error{}: {} (code: {})", bold, red, reset, operation, static_cast<int>(result)));
+        }
+    }
+
+    export void log_plugin(const std::string_view plugin_name, const std::string_view message, const std::string_view color = cyan) {
+        std::println("{}{}[{}]{} {}", bold, color, plugin_name, reset, message);
+    }
+
+    export void log_success(const std::string_view plugin_name, const std::string_view message) {
+        log_plugin(plugin_name, message, green);
+    }
+
+    export void log_info(const std::string_view plugin_name, const std::string_view message) {
+        log_plugin(plugin_name, message, cyan);
+    }
+
+    export void log_warning(const std::string_view plugin_name, const std::string_view message) {
+        log_plugin(plugin_name, message, yellow);
+    }
+
+    export void log_error(const std::string_view plugin_name, const std::string_view message) {
+        log_plugin(plugin_name, message, red);
+    }
+
     export struct DescriptorAllocator {
         struct PoolSizeRatio {
             VkDescriptorType type;
@@ -156,17 +194,7 @@ namespace vk::context {
         VkCommandPool computeCommandPool{};
     };
 
-    export enum class PluginPhase : uint32_t {
-        None       = 0,
-        Setup      = 1 << 0,
-        Initialize = 1 << 1,
-        PreRender  = 1 << 2,
-        Render     = 1 << 3,
-        PostRender = 1 << 4,
-        Present    = 1 << 5,
-        Cleanup    = 1 << 6,
-        All        = 0xFFFFFFFF
-    };
+    export enum class PluginPhase : uint32_t { None = 0, Setup = 1 << 0, Initialize = 1 << 1, PreRender = 1 << 2, Render = 1 << 3, PostRender = 1 << 4, Present = 1 << 5, Cleanup = 1 << 6, All = 0xFFFFFFFF };
 
     export constexpr PluginPhase operator|(PluginPhase a, PluginPhase b) {
         return static_cast<PluginPhase>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));

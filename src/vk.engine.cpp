@@ -3,15 +3,15 @@ module;
 #include "vk_mem_alloc.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
+#include <backends/imgui_impl_sdl3.h>
+#include <backends/imgui_impl_vulkan.h>
+#include <imgui.h>
 #include <print>
 #include <ranges>
 #include <stb_image_write.h>
 module vk.engine;
 
 // clang-format off
-#ifndef VK_CHECK
-#define VK_CHECK(x) do { VkResult _vk_check_res = (x); if (_vk_check_res != VK_SUCCESS) { throw std::runtime_error(std::string("Vulkan error ") + std::to_string(_vk_check_res) + " at " #x); } } while (false)
-#endif
 #ifndef IF_NOT_NULL_DO
 #define IF_NOT_NULL_DO(ptr, stmt) do { if ((ptr) != nullptr) { stmt; } } while (false)
 #endif
@@ -111,7 +111,7 @@ void vk::engine::VulkanEngine::create_context() {
     ctx_.transfer_queue_family = vkbDev.get_queue_index(vkb::QueueType::transfer).value();
     ctx_.present_queue_family  = ctx_.graphics_queue_family;
     VmaAllocatorCreateInfo ac{.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT, .physicalDevice = ctx_.physical, .device = ctx_.device, .instance = ctx_.instance, .vulkanApiVersion = VK_API_VERSION_1_3};
-    VK_CHECK(vmaCreateAllocator(&ac, &ctx_.allocator));
+    context::vk_check(vmaCreateAllocator(&ac, &ctx_.allocator));
     mdq_.emplace_back([&] { vmaDestroyAllocator(ctx_.allocator); });
 
     std::vector<context::DescriptorAllocator::PoolSizeRatio> sizes = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2.0f}, {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4.0f}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4.0f}, {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4.0f}};
@@ -120,7 +120,7 @@ void vk::engine::VulkanEngine::create_context() {
 
     VkSemaphoreTypeCreateInfo type_ci{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO, .pNext = nullptr, .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = 0};
     VkSemaphoreCreateInfo sem_ci{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &type_ci, .flags = 0u};
-    VK_CHECK(vkCreateSemaphore(ctx_.device, &sem_ci, nullptr, &render_timeline_));
+    context::vk_check(vkCreateSemaphore(ctx_.device, &sem_ci, nullptr, &render_timeline_));
     mdq_.emplace_back([&] { vkDestroySemaphore(ctx_.device, render_timeline_, nullptr); });
     timeline_value_ = 0;
 }
@@ -192,7 +192,7 @@ void vk::engine::VulkanEngine::create_renderer_targets() {
             .pQueueFamilyIndices       = nullptr,
             .initialLayout             = req.initial_layout};
         constexpr VmaAllocationCreateInfo ainfo{.flags = 0u, .usage = VMA_MEMORY_USAGE_GPU_ONLY, .requiredFlags = static_cast<VkMemoryPropertyFlags>(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT), .preferredFlags = 0u, .memoryTypeBits = 0u, .pool = VK_NULL_HANDLE, .pUserData = nullptr, .priority = 1.0f};
-        VK_CHECK(vmaCreateImage(ctx_.allocator, &imgci, &ainfo, &out.image.image, &out.image.allocation, nullptr));
+        context::vk_check(vmaCreateImage(ctx_.allocator, &imgci, &ainfo, &out.image.image, &out.image.allocation, nullptr));
         const VkImageViewCreateInfo viewci{.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
             .pNext                                = nullptr,
             .flags                                = 0u,
@@ -201,7 +201,7 @@ void vk::engine::VulkanEngine::create_renderer_targets() {
             .format                               = req.format,
             .components                           = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
             .subresourceRange                     = {req.aspect, 0u, 1u, 0u, 1u}};
-        VK_CHECK(vkCreateImageView(ctx_.device, &viewci, nullptr, &out.image.imageView));
+        context::vk_check(vkCreateImageView(ctx_.device, &viewci, nullptr, &out.image.imageView));
         out.image.imageFormat = req.format;
         out.image.imageExtent = {this->state_.width, this->state_.height, 1u};
         out.usage             = req.usage;
@@ -252,19 +252,19 @@ void vk::engine::VulkanEngine::destroy_renderer_targets() {
 void vk::engine::VulkanEngine::create_command_buffers() {
     const VkCommandPoolCreateInfo pci{.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .pNext = nullptr, .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, .queueFamilyIndex = ctx_.graphics_queue_family};
     for (auto& fr : frames_) {
-        VK_CHECK(vkCreateCommandPool(ctx_.device, &pci, nullptr, &fr.commandPool));
+        context::vk_check(vkCreateCommandPool(ctx_.device, &pci, nullptr, &fr.commandPool));
         VkCommandBufferAllocateInfo ai{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .pNext = nullptr, .commandPool = fr.commandPool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1u};
-        VK_CHECK(vkAllocateCommandBuffers(ctx_.device, &ai, &fr.mainCommandBuffer));
+        context::vk_check(vkAllocateCommandBuffers(ctx_.device, &ai, &fr.mainCommandBuffer));
         VkSemaphoreCreateInfo sci{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = nullptr, .flags = 0u};
-        VK_CHECK(vkCreateSemaphore(ctx_.device, &sci, nullptr, &fr.imageAcquired));
-        VK_CHECK(vkCreateSemaphore(ctx_.device, &sci, nullptr, &fr.renderComplete));
+        context::vk_check(vkCreateSemaphore(ctx_.device, &sci, nullptr, &fr.imageAcquired));
+        context::vk_check(vkCreateSemaphore(ctx_.device, &sci, nullptr, &fr.renderComplete));
         if (renderer_caps_.allow_async_compute && ctx_.compute_queue && ctx_.compute_queue != ctx_.graphics_queue) {
             VkCommandPoolCreateInfo cpool{.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .pNext = nullptr, .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, .queueFamilyIndex = ctx_.compute_queue_family};
-            VK_CHECK(vkCreateCommandPool(ctx_.device, &cpool, nullptr, &fr.computeCommandPool));
+            context::vk_check(vkCreateCommandPool(ctx_.device, &cpool, nullptr, &fr.computeCommandPool));
             VkCommandBufferAllocateInfo cai{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .pNext = nullptr, .commandPool = fr.computeCommandPool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1u};
-            VK_CHECK(vkAllocateCommandBuffers(ctx_.device, &cai, &fr.asyncComputeCommandBuffer));
+            context::vk_check(vkAllocateCommandBuffers(ctx_.device, &cai, &fr.asyncComputeCommandBuffer));
             VkSemaphoreCreateInfo sci2{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = nullptr, .flags = 0u};
-            VK_CHECK(vkCreateSemaphore(ctx_.device, &sci2, nullptr, &fr.asyncComputeFinished));
+            context::vk_check(vkCreateSemaphore(ctx_.device, &sci2, nullptr, &fr.asyncComputeFinished));
         }
     }
     mdq_.emplace_back([&] { destroy_command_buffers(); });
@@ -289,7 +289,7 @@ void vk::engine::VulkanEngine::begin_frame(uint32_t& image_index, VkCommandBuffe
         VkSemaphore sem = render_timeline_;
         uint64_t val    = fr.submitted_timeline_value;
         const VkSemaphoreWaitInfo wi{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .pNext = nullptr, .flags = 0u, .semaphoreCount = 1u, .pSemaphores = &sem, .pValues = &val};
-        VK_CHECK(vkWaitSemaphores(ctx_.device, &wi, UINT64_MAX));
+        context::vk_check(vkWaitSemaphores(ctx_.device, &wi, UINT64_MAX));
     }
     const VkResult acq = vkAcquireNextImageKHR(ctx_.device, swapchain_.swapchain, UINT64_MAX, fr.imageAcquired, VK_NULL_HANDLE, &image_index);
     if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
@@ -297,14 +297,14 @@ void vk::engine::VulkanEngine::begin_frame(uint32_t& image_index, VkCommandBuffe
         cmd                     = VK_NULL_HANDLE;
         return;
     }
-    VK_CHECK(acq);
-    VK_CHECK(vkResetCommandBuffer(fr.mainCommandBuffer, 0));
+    context::vk_check(acq);
+    context::vk_check(vkResetCommandBuffer(fr.mainCommandBuffer, 0));
     cmd = fr.mainCommandBuffer;
     constexpr VkCommandBufferBeginInfo bi{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .pNext = nullptr, .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, .pInheritanceInfo = nullptr};
-    VK_CHECK(vkBeginCommandBuffer(cmd, &bi));
+    context::vk_check(vkBeginCommandBuffer(cmd, &bi));
 }
 void vk::engine::VulkanEngine::end_frame(uint32_t image_index, VkCommandBuffer cmd) {
-    VK_CHECK(vkEndCommandBuffer(cmd));
+    context::vk_check(vkEndCommandBuffer(cmd));
     context::FrameData& fr = frames_[state_.frame_number % context::FRAME_OVERLAP];
     VkCommandBufferSubmitInfo cbsi{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .pNext = nullptr, .commandBuffer = cmd, .deviceMask = 0u};
     VkSemaphoreSubmitInfo waitInfos[2]{};
@@ -320,7 +320,7 @@ void vk::engine::VulkanEngine::end_frame(uint32_t image_index, VkCommandBuffer c
     VkSemaphoreSubmitInfo signalInfos[2]{VkSemaphoreSubmitInfo{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .pNext = nullptr, .semaphore = fr.renderComplete, .value = 0u, .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, .deviceIndex = 0u},
         VkSemaphoreSubmitInfo{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .pNext = nullptr, .semaphore = render_timeline_, .value = timeline_to_signal, .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, .deviceIndex = 0u}};
     const VkSubmitInfo2 si{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2, .pNext = nullptr, .waitSemaphoreInfoCount = waitCount, .pWaitSemaphoreInfos = waitInfos, .commandBufferInfoCount = 1, .pCommandBufferInfos = &cbsi, .signalSemaphoreInfoCount = 2u, .pSignalSemaphoreInfos = signalInfos};
-    VK_CHECK(vkQueueSubmit2(ctx_.graphics_queue, 1, &si, VK_NULL_HANDLE));
+    context::vk_check(vkQueueSubmit2(ctx_.graphics_queue, 1, &si, VK_NULL_HANDLE));
     fr.submitted_timeline_value = timeline_to_signal;
     const VkPresentInfoKHR pi{.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, .pNext = nullptr, .waitSemaphoreCount = 1u, .pWaitSemaphores = &fr.renderComplete, .swapchainCount = 1u, .pSwapchains = &swapchain_.swapchain, .pImageIndices = &image_index, .pResults = nullptr};
     const VkResult pres = vkQueuePresentKHR(ctx_.graphics_queue, &pi);
@@ -328,7 +328,37 @@ void vk::engine::VulkanEngine::end_frame(uint32_t image_index, VkCommandBuffer c
         state_.resize_requested = true;
         return;
     }
-    VK_CHECK(pres);
+    context::vk_check(pres);
+}
+void vk::engine::VulkanEngine::create_imgui() {
+    constexpr std::array pool_sizes{
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}
+    };
+
+    const VkDescriptorPoolCreateInfo pool_info{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .maxSets = 1000u * static_cast<uint32_t>(pool_sizes.size()),
+        .poolSizeCount = static_cast<uint32_t>(pool_sizes.size()),
+        .pPoolSizes = pool_sizes.data()
+    };
+    // context::vk_check(vkCreateDescriptorPool(eng.device, &pool_info, nullptr, &eng.descriptor_allocator.pool), "Failed to create descriptor pool");
+}
+void vk::engine::VulkanEngine::destroy_imgui() {
+    vkDeviceWaitIdle(ctx_.device);
+    ImGui_ImplVulkan_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
+    ImGui::DestroyContext();
 }
 
 void vk::engine::VulkanEngine::blit_offscreen_to_swapchain(uint32_t image_index, VkCommandBuffer cmd, VkExtent2D extent) {
