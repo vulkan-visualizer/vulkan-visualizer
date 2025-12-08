@@ -153,12 +153,12 @@ namespace vk::plugins {
         };
         ctx.caps->presentation_attachment = "color";
 
-        log_success(name(), "Setup complete → renderer configured");
+        log_success(name(), "Setup complete: renderer configured");
     }
 
     void Viewport3DPlugin::on_initialize(engine::PluginContext& ctx) {
         create_imgui(*ctx.engine, *ctx.frame);
-        log_success(name(), "Initialized → UI ready");
+        log_success(name(), "Initialized: UI ready");
     }
 
     void Viewport3DPlugin::on_pre_render(engine::PluginContext& ctx) {
@@ -198,7 +198,7 @@ namespace vk::plugins {
     void Viewport3DPlugin::on_resize(const uint32_t width, const uint32_t height) noexcept {
         viewport_width_ = static_cast<int>(width);
         viewport_height_ = static_cast<int>(height);
-        log_info(name(), std::format("Viewport resized → {}x{}", width, height));
+        log_info(name(), std::format("Viewport resized: {}x{}", width, height));
     }
 
     void Viewport3DPlugin::begin_rendering(VkCommandBuffer& cmd, const context::AttachmentView& target, const VkExtent2D extent) {
@@ -295,7 +295,7 @@ namespace vk::plugins {
             throw std::runtime_error("Failed to initialize ImGui Vulkan backend");
         }
 
-        log_success(name(), "ImGui initialized → docking enabled");
+        log_success(name(), "ImGui initialized: docking enabled");
     }
 
     void Viewport3DPlugin::destroy_imgui(const context::EngineContext& /*eng*/) const {
@@ -540,7 +540,7 @@ namespace vk::plugins {
     }
 
     void ScreenshotPlugin::on_initialize(engine::PluginContext& /*ctx*/) {
-        log_success(name(), "Initialized → Press F1 to capture");
+        log_success(name(), "Initialized: Press F1 to capture");
     }
 
     void ScreenshotPlugin::on_pre_render(engine::PluginContext& ctx) {
@@ -685,7 +685,7 @@ namespace vk::plugins {
 
         pending_capture_ = {buffer, alloc, width, height, generate_filename()};
 
-        log_info(name(), std::format("Capture queued → {}x{}", width, height));
+        log_info(name(), std::format("Capture queued: {}x{}", width, height));
     }
 
     void ScreenshotPlugin::save_screenshot(void* pixel_data, const uint32_t width, const uint32_t height,
@@ -719,7 +719,7 @@ namespace vk::plugins {
             break;
         }
 
-        log_success(name(), std::format("Saved → {}", path));
+        log_success(name(), std::format("Saved: {}", path));
     }
 
     std::string ScreenshotPlugin::generate_filename() const {
@@ -1514,7 +1514,7 @@ namespace vk::plugins {
         vkDestroyShaderModule(eng.device, vert_module, nullptr);
         vkDestroyShaderModule(eng.device, frag_module, nullptr);
 
-        log_success(name(), "Pipelines created → filled, wireframe, and line modes ready");
+        log_success(name(), "Pipelines created: filled, wireframe, and line modes ready");
     }
 
     void GeometryPlugin::destroy_pipelines(const context::EngineContext& eng) {
