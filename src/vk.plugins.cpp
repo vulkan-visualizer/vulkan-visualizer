@@ -1068,7 +1068,8 @@ namespace vk::plugins {
         }
         geometry_meshes_.clear();
 
-        for (auto& inst_buf : instance_buffers_) {
+        for (size_t i = 0; i < instance_buffers_.size(); ++i) {
+            auto& inst_buf = instance_buffers_[i];
             if (inst_buf.buffer != VK_NULL_HANDLE) {
                 vmaDestroyBuffer(eng.allocator, inst_buf.buffer, inst_buf.allocation);
             }

@@ -148,8 +148,9 @@ namespace vk::engine {
         ([&] {
             if (plugins.is_enabled() && (plugins.phases() & PluginPhase::Initialize)) {
                 plugins.on_initialize(ctx);
-                mdq_.emplace_back([&plugins] {
+                mdq_.emplace_back([this, &plugins] {
                     PluginContext cleanup_ctx{};
+                    cleanup_ctx.engine = &ctx_;
                     plugins.on_cleanup(cleanup_ctx);
                 });
             }
