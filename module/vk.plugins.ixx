@@ -217,6 +217,26 @@ namespace vk::plugins {
         void add_ray(const camera::Vec3& origin, const camera::Vec3& direction, float length, const camera::Vec3& color = {1, 1, 1});
         void add_grid(const camera::Vec3& position, float size, int divisions, const camera::Vec3& color = {0.5f, 0.5f, 0.5f});
 
+        // Advanced ray visualization methods for NeRF debugging
+        void add_camera_frustum(const camera::Vec3& position, const camera::Vec3& forward, const camera::Vec3& up,
+                                float fov_deg, float aspect, float near_dist, float far_dist, const camera::Vec3& color = {1, 1, 0});
+        void add_image_plane(const camera::Vec3& camera_pos, const camera::Vec3& forward, const camera::Vec3& up,
+                             float fov_deg, float aspect, float distance, int grid_divisions = 10, const camera::Vec3& color = {0.7f, 0.7f, 0.7f});
+        void add_aabb(const camera::Vec3& min, const camera::Vec3& max, const camera::Vec3& color = {0, 1, 1}, RenderMode mode = RenderMode::Wireframe);
+        void add_ray_with_aabb_intersection(const camera::Vec3& ray_origin, const camera::Vec3& ray_dir, float ray_length,
+                                            const camera::Vec3& aabb_min, const camera::Vec3& aabb_max,
+                                            const camera::Vec3& ray_color = {1, 0, 0}, const camera::Vec3& hit_color = {0, 1, 0});
+        void add_coordinate_axes(const camera::Vec3& position, float size = 1.0f);
+
+        // Batch ray visualization (for many rays at once)
+        struct RayInfo {
+            camera::Vec3 origin;
+            camera::Vec3 direction;
+            float length{1.0f};
+            camera::Vec3 color{1, 1, 1};
+        };
+        void add_ray_batch(const std::vector<RayInfo>& rays, const camera::Vec3* aabb_min = nullptr, const camera::Vec3* aabb_max = nullptr);
+
         void set_viewport_plugin(Viewport3DPlugin* vp) noexcept { viewport_plugin_ = vp; }
 
     private:
@@ -260,6 +280,7 @@ namespace vk::plugins {
         VkPipelineLayout pipeline_layout_{VK_NULL_HANDLE};
         VkPipeline filled_pipeline_{VK_NULL_HANDLE};
         VkPipeline wireframe_pipeline_{VK_NULL_HANDLE};
+        VkPipeline line_pipeline_{VK_NULL_HANDLE};
 
         std::unordered_map<GeometryType, GeometryMesh> geometry_meshes_;
         std::vector<InstanceBuffer> instance_buffers_;

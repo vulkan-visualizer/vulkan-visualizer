@@ -829,8 +829,21 @@ namespace vk::plugins {
         const auto mid = (start + end) * 0.5f;
         const auto diff = end - start;
         const auto length = diff.length();
+
+        if (length < 1e-6f) return; // Skip degenerate lines
+
+        // Calculate rotation to align line with direction
+        const auto dir = diff / length;
+
+        // Calculate euler angles to rotate from X-axis to direction
+        // Yaw (rotation around Y axis)
+        const float yaw = std::atan2(dir.z, dir.x) * 180.0f / 3.14159265359f;
+
+        // Pitch (rotation around Z axis)
+        const float pitch = std::asin(-dir.y) * 180.0f / 3.14159265359f;
+
         GeometryBatch batch{GeometryType::Line, RenderMode::Wireframe};
-        batch.instances.push_back({mid, {0, 0, 0}, {length, 1, 1}, color, 1.0f});
+        batch.instances.push_back({mid, {0, yaw, pitch}, {length, 1, 1}, color, 1.0f});
         add_batch(batch);
     }
 
@@ -841,333 +854,224 @@ namespace vk::plugins {
 
     void GeometryPlugin::add_grid(const camera::Vec3& position, const float size,
                                   const int divisions, const camera::Vec3& color) {
-        GeometryBatch batch{GeometryType::Grid, RenderMode::Wireframe};
-        batch.instances.push_back({position, {0, 0, 0}, {size, 1, static_cast<float>(divisions)}, color, 1.0f});
-        add_batch(batch);
-    }
+        const float step = size / static_cast<float>(divisions);
+        const float half_size = size * 0.5f;
 
-    void GeometryPlugin::create_pipelines(const context::EngineContext& eng) {
-        // Push constant range for view-projection matrix
-        const VkPushConstantRange push_constant{
-            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-            .offset = 0,
-            .size = sizeof(float) * 16  // mat4
-        };
-
-        const VkPipelineLayoutCreateInfo layout_info{
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-            .pushConstantRangeCount = 1,
-            .pPushConstantRanges = &push_constant
-        };
-
-        vk_check(vkCreatePipelineLayout(eng.device, &layout_info, nullptr, &pipeline_layout_),
-                 "Failed to create geometry pipeline layout");
-
-        // Load shaders
-        auto load_shader = [&eng](const char* path) -> VkShaderModule {
-            std::ifstream file(path, std::ios::binary | std::ios::ate);
-            if (!file.is_open()) {
-                throw std::runtime_error(std::format("Failed to open shader: {}", path));
-            }
-
-            const auto size = static_cast<size_t>(file.tellg());
-            file.seekg(0);
-            std::vector<char> code(size);
-            file.read(code.data(), static_cast<std::streamsize>(size));
-
-            const VkShaderModuleCreateInfo create_info{
-                .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-                .codeSize = code.size(),
-                .pCode = reinterpret_cast<const uint32_t*>(code.data())
-            };
-
-            VkShaderModule module;
-            vk_check(vkCreateShaderModule(eng.device, &create_info, nullptr, &module),
-                     "Failed to create shader module");
-            return module;
-        };
-
-        VkShaderModule vs = load_shader("shader/geometry.vert.spv");
-        VkShaderModule fs = load_shader("shader/geometry.frag.spv");
-
-        const VkPipelineShaderStageCreateInfo stages[2] = {
-            {
-                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                .stage = VK_SHADER_STAGE_VERTEX_BIT,
-                .module = vs,
-                .pName = "main"
-            },
-            {
-                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-                .module = fs,
-                .pName = "main"
-            }
-        };
-
-        // Vertex input: mesh attributes + instance attributes
-        const VkVertexInputBindingDescription bindings[] = {
-            {
-                .binding = 0,
-                .stride = sizeof(float) * 6,  // position(3) + normal(3)
-                .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
-            },
-            {
-                .binding = 1,
-                .stride = sizeof(GeometryInstance),
-                .inputRate = VK_VERTEX_INPUT_RATE_INSTANCE
-            }
-        };
-
-        const VkVertexInputAttributeDescription attributes[] = {
-            // Mesh vertex attributes
-            {.location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = 0},                    // position
-            {.location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = sizeof(float) * 3},    // normal
-            // Instance attributes
-            {.location = 2, .binding = 1, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(GeometryInstance, position)},
-            {.location = 3, .binding = 1, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(GeometryInstance, rotation)},
-            {.location = 4, .binding = 1, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(GeometryInstance, scale)},
-            {.location = 5, .binding = 1, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(GeometryInstance, color)},
-            {.location = 6, .binding = 1, .format = VK_FORMAT_R32_SFLOAT, .offset = offsetof(GeometryInstance, alpha)},
-        };
-
-        const VkPipelineVertexInputStateCreateInfo vertex_input{
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-            .vertexBindingDescriptionCount = 2,
-            .pVertexBindingDescriptions = bindings,
-            .vertexAttributeDescriptionCount = 7,
-            .pVertexAttributeDescriptions = attributes
-        };
-
-        const VkPipelineInputAssemblyStateCreateInfo input_assembly{
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-            .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-        };
-
-        const VkPipelineViewportStateCreateInfo viewport_state{
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-            .viewportCount = 1,
-            .scissorCount = 1
-        };
-
-        const VkPipelineRasterizationStateCreateInfo rasterization_filled{
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-            .polygonMode = VK_POLYGON_MODE_FILL,
-            .cullMode = VK_CULL_MODE_BACK_BIT,
-            .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-            .lineWidth = 1.0f
-        };
-
-        const VkPipelineRasterizationStateCreateInfo rasterization_wireframe{
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-            .polygonMode = VK_POLYGON_MODE_LINE,
-            .cullMode = VK_CULL_MODE_NONE,
-            .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-            .lineWidth = 1.0f
-        };
-
-        const VkPipelineMultisampleStateCreateInfo multisample{
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-            .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT
-        };
-
-        const VkPipelineColorBlendAttachmentState color_blend_attachment{
-            .blendEnable = VK_FALSE,
-            .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                              VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
-        };
-
-        const VkPipelineColorBlendStateCreateInfo color_blend{
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-            .attachmentCount = 1,
-            .pAttachments = &color_blend_attachment
-        };
-
-        constexpr VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-        const VkPipelineDynamicStateCreateInfo dynamic_state{
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-            .dynamicStateCount = 2,
-            .pDynamicStates = dynamic_states
-        };
-
-        const VkFormat color_format = VK_FORMAT_B8G8R8A8_UNORM;
-        const VkPipelineRenderingCreateInfo rendering_info{
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-            .colorAttachmentCount = 1,
-            .pColorAttachmentFormats = &color_format
-        };
-
-        // Create filled pipeline
-        VkGraphicsPipelineCreateInfo pipeline_info{
-            .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-            .pNext = &rendering_info,
-            .stageCount = 2,
-            .pStages = stages,
-            .pVertexInputState = &vertex_input,
-            .pInputAssemblyState = &input_assembly,
-            .pViewportState = &viewport_state,
-            .pRasterizationState = &rasterization_filled,
-            .pMultisampleState = &multisample,
-            .pColorBlendState = &color_blend,
-            .pDynamicState = &dynamic_state,
-            .layout = pipeline_layout_
-        };
-
-        vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &filled_pipeline_),
-                 "Failed to create filled geometry pipeline");
-
-        // Create wireframe pipeline
-        pipeline_info.pRasterizationState = &rasterization_wireframe;
-        vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &wireframe_pipeline_),
-                 "Failed to create wireframe geometry pipeline");
-
-        vkDestroyShaderModule(eng.device, vs, nullptr);
-        vkDestroyShaderModule(eng.device, fs, nullptr);
-
-        log_success(name(), "Pipelines created → filled and wireframe modes ready");
-    }
-
-    void GeometryPlugin::destroy_pipelines(const context::EngineContext& eng) {
-        if (filled_pipeline_ != VK_NULL_HANDLE) {
-            vkDestroyPipeline(eng.device, filled_pipeline_, nullptr);
-            filled_pipeline_ = VK_NULL_HANDLE;
+        // Generate grid lines along X axis (parallel to Z)
+        for (int i = 0; i <= divisions; ++i) {
+            const float offset = -half_size + i * step;
+            const camera::Vec3 start = position + camera::Vec3{-half_size, 0, offset};
+            const camera::Vec3 end = position + camera::Vec3{half_size, 0, offset};
+            add_line(start, end, color);
         }
-        if (wireframe_pipeline_ != VK_NULL_HANDLE) {
-            vkDestroyPipeline(eng.device, wireframe_pipeline_, nullptr);
-            wireframe_pipeline_ = VK_NULL_HANDLE;
-        }
-        if (pipeline_layout_ != VK_NULL_HANDLE) {
-            vkDestroyPipelineLayout(eng.device, pipeline_layout_, nullptr);
-            pipeline_layout_ = VK_NULL_HANDLE;
+
+        // Generate grid lines along Z axis (parallel to X)
+        for (int i = 0; i <= divisions; ++i) {
+            const float offset = -half_size + i * step;
+            const camera::Vec3 start = position + camera::Vec3{offset, 0, -half_size};
+            const camera::Vec3 end = position + camera::Vec3{offset, 0, half_size};
+            add_line(start, end, color);
         }
     }
 
-    void GeometryPlugin::create_geometry_meshes(const context::EngineContext& eng) {
-        geometry_meshes_[GeometryType::Sphere] = create_sphere_mesh(eng);
-        geometry_meshes_[GeometryType::Box] = create_box_mesh(eng);
-        geometry_meshes_[GeometryType::Cylinder] = create_cylinder_mesh(eng);
-        geometry_meshes_[GeometryType::Cone] = create_cone_mesh(eng);
-        geometry_meshes_[GeometryType::Torus] = create_torus_mesh(eng);
-        geometry_meshes_[GeometryType::Capsule] = create_capsule_mesh(eng);
-        geometry_meshes_[GeometryType::Plane] = create_plane_mesh(eng);
-        geometry_meshes_[GeometryType::Circle] = create_circle_mesh(eng);
-        geometry_meshes_[GeometryType::Line] = create_line_mesh(eng);
-        // Grid and Ray use the line mesh with modifications
-        geometry_meshes_[GeometryType::Grid] = create_line_mesh(eng);
-        geometry_meshes_[GeometryType::Ray] = create_line_mesh(eng);
+    // ============================================================================
+    // Advanced Ray Visualization Methods for NeRF Debugging
+    // ============================================================================
+
+    void GeometryPlugin::add_camera_frustum(const camera::Vec3& position, const camera::Vec3& forward,
+                                            const camera::Vec3& up, float fov_deg, float aspect,
+                                            float near_dist, float far_dist, const camera::Vec3& color) {
+        // Calculate frustum corners
+        const float fov_rad = fov_deg * 3.14159265359f / 180.0f;
+        const float tan_half_fov = std::tan(fov_rad * 0.5f);
+
+        const auto right = forward.cross(up).normalized();
+        const auto true_up = right.cross(forward).normalized();
+
+        // Near plane
+        const float near_height = 2.0f * tan_half_fov * near_dist;
+        const float near_width = near_height * aspect;
+        const auto near_center = position + forward * near_dist;
+
+        // Far plane
+        const float far_height = 2.0f * tan_half_fov * far_dist;
+        const float far_width = far_height * aspect;
+        const auto far_center = position + forward * far_dist;
+
+        // Near corners
+        const auto ntr = near_center + true_up * (near_height * 0.5f) + right * (near_width * 0.5f);
+        const auto ntl = near_center + true_up * (near_height * 0.5f) - right * (near_width * 0.5f);
+        const auto nbr = near_center - true_up * (near_height * 0.5f) + right * (near_width * 0.5f);
+        const auto nbl = near_center - true_up * (near_height * 0.5f) - right * (near_width * 0.5f);
+
+        // Far corners
+        const auto ftr = far_center + true_up * (far_height * 0.5f) + right * (far_width * 0.5f);
+        const auto ftl = far_center + true_up * (far_height * 0.5f) - right * (far_width * 0.5f);
+        const auto fbr = far_center - true_up * (far_height * 0.5f) + right * (far_width * 0.5f);
+        const auto fbl = far_center - true_up * (far_height * 0.5f) - right * (far_width * 0.5f);
+
+        // Draw frustum edges
+        // Near plane
+        add_line(ntl, ntr, color);
+        add_line(ntr, nbr, color);
+        add_line(nbr, nbl, color);
+        add_line(nbl, ntl, color);
+
+        // Far plane
+        add_line(ftl, ftr, color);
+        add_line(ftr, fbr, color);
+        add_line(fbr, fbl, color);
+        add_line(fbl, ftl, color);
+
+        // Connecting edges
+        add_line(ntl, ftl, color);
+        add_line(ntr, ftr, color);
+        add_line(nbr, fbr, color);
+        add_line(nbl, fbl, color);
+
+        // Camera position marker
+        add_sphere(position, near_dist * 0.1f, color, RenderMode::Filled);
     }
 
-    void GeometryPlugin::destroy_geometry_meshes(const context::EngineContext& eng) {
-        for (auto& [type, mesh] : geometry_meshes_) {
-            if (mesh.vertex_buffer != VK_NULL_HANDLE) {
-                vmaDestroyBuffer(eng.allocator, mesh.vertex_buffer, mesh.vertex_allocation);
-            }
-            if (mesh.index_buffer != VK_NULL_HANDLE) {
-                vmaDestroyBuffer(eng.allocator, mesh.index_buffer, mesh.index_allocation);
-            }
-        }
-        geometry_meshes_.clear();
+    void GeometryPlugin::add_image_plane(const camera::Vec3& camera_pos, const camera::Vec3& forward,
+                                         const camera::Vec3& up, float fov_deg, float aspect,
+                                         float distance, int grid_divisions, const camera::Vec3& color) {
+        const float fov_rad = fov_deg * 3.14159265359f / 180.0f;
+        const float tan_half_fov = std::tan(fov_rad * 0.5f);
 
-        for (size_t i = 0; i < instance_buffers_.size(); ++i) {
-            auto& inst_buf = instance_buffers_[i];
-            if (inst_buf.buffer != VK_NULL_HANDLE) {
-                vmaDestroyBuffer(eng.allocator, inst_buf.buffer, inst_buf.allocation);
-            }
+        const auto right = forward.cross(up).normalized();
+        const auto true_up = right.cross(forward).normalized();
+
+        const float plane_height = 2.0f * tan_half_fov * distance;
+        const float plane_width = plane_height * aspect;
+
+        const auto plane_center = camera_pos + forward * distance;
+
+        // Draw grid on image plane
+        for (int i = 0; i <= grid_divisions; ++i) {
+            const float t = static_cast<float>(i) / static_cast<float>(grid_divisions);
+            const float offset = (t - 0.5f) * plane_height;
+
+            // Horizontal lines
+            const auto h_start = plane_center + true_up * offset - right * (plane_width * 0.5f);
+            const auto h_end = plane_center + true_up * offset + right * (plane_width * 0.5f);
+            add_line(h_start, h_end, color);
         }
-        instance_buffers_.clear();
+
+        for (int i = 0; i <= grid_divisions; ++i) {
+            const float t = static_cast<float>(i) / static_cast<float>(grid_divisions);
+            const float offset = (t - 0.5f) * plane_width;
+
+            // Vertical lines
+            const auto v_start = plane_center + right * offset - true_up * (plane_height * 0.5f);
+            const auto v_end = plane_center + right * offset + true_up * (plane_height * 0.5f);
+            add_line(v_start, v_end, color);
+        }
     }
 
-    void GeometryPlugin::update_instance_buffers(const context::EngineContext& eng) {
-        // Resize instance buffers vector if needed
-        if (instance_buffers_.size() < batches_.size()) {
-            instance_buffers_.resize(batches_.size());
-        }
+    void GeometryPlugin::add_aabb(const camera::Vec3& min, const camera::Vec3& max,
+                                   const camera::Vec3& color, RenderMode mode) {
+        const auto center = (min + max) * 0.5f;
+        const auto size = max - min;
+        add_box(center, size, color, mode);
+    }
 
-        // Update each instance buffer
-        for (size_t i = 0; i < batches_.size(); ++i) {
-            const auto& batch = batches_[i];
-            auto& inst_buf = instance_buffers_[i];
+    void GeometryPlugin::add_ray_with_aabb_intersection(const camera::Vec3& ray_origin, const camera::Vec3& ray_dir,
+                                                         float ray_length, const camera::Vec3& aabb_min,
+                                                         const camera::Vec3& aabb_max, const camera::Vec3& ray_color,
+                                                         const camera::Vec3& hit_color) {
+        // Ray-AABB intersection test (slab method)
+        const auto dir_normalized = ray_dir.normalized();
 
-            if (batch.instances.empty()) continue;
+        float t_min = 0.0f;
+        float t_max = ray_length;
 
-            const auto required_size = batch.instances.size() * sizeof(GeometryInstance);
+        bool intersects = true;
 
-            // Recreate buffer if too small
-            if (inst_buf.capacity < required_size) {
-                if (inst_buf.buffer != VK_NULL_HANDLE) {
-                    vmaDestroyBuffer(eng.allocator, inst_buf.buffer, inst_buf.allocation);
+        // Test all three slabs
+        for (int i = 0; i < 3; ++i) {
+            const float origin_comp = (i == 0) ? ray_origin.x : (i == 1) ? ray_origin.y : ray_origin.z;
+            const float dir_comp = (i == 0) ? dir_normalized.x : (i == 1) ? dir_normalized.y : dir_normalized.z;
+            const float min_comp = (i == 0) ? aabb_min.x : (i == 1) ? aabb_min.y : aabb_min.z;
+            const float max_comp = (i == 0) ? aabb_max.x : (i == 1) ? aabb_max.y : aabb_max.z;
+
+            if (std::abs(dir_comp) < 1e-8f) {
+                // Ray is parallel to slab
+                if (origin_comp < min_comp || origin_comp > max_comp) {
+                    intersects = false;
+                    break;
                 }
+            } else {
+                const float t1 = (min_comp - origin_comp) / dir_comp;
+                const float t2 = (max_comp - origin_comp) / dir_comp;
 
-                const VkBufferCreateInfo buffer_ci{
-                    .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                    .size = required_size,
-                    .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                    .sharingMode = VK_SHARING_MODE_EXCLUSIVE
-                };
+                const float t_near = std::min(t1, t2);
+                const float t_far = std::max(t1, t2);
 
-                constexpr VmaAllocationCreateInfo alloc_ci{
-                    .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
-                    .usage = VMA_MEMORY_USAGE_AUTO,
-                    .requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-                };
+                t_min = std::max(t_min, t_near);
+                t_max = std::min(t_max, t_far);
 
-                VmaAllocationInfo alloc_info{};
-                vk_check(vmaCreateBuffer(eng.allocator, &buffer_ci, &alloc_ci,
-                    &inst_buf.buffer, &inst_buf.allocation, &alloc_info),
-                    "Failed to create instance buffer");
-
-                inst_buf.capacity = static_cast<uint32_t>(required_size);
-
-                // Copy data
-                void* data = nullptr;
-                vmaMapMemory(eng.allocator, inst_buf.allocation, &data);
-                std::memcpy(data, batch.instances.data(), required_size);
-                vmaUnmapMemory(eng.allocator, inst_buf.allocation);
+                if (t_min > t_max) {
+                    intersects = false;
+                    break;
+                }
             }
+        }
+
+        if (intersects && t_min >= 0.0f && t_min <= ray_length) {
+            // Draw ray up to intersection point
+            const auto hit_point = ray_origin + dir_normalized * t_min;
+            add_line(ray_origin, hit_point, ray_color);
+
+            // Mark intersection point
+            add_sphere(hit_point, 0.05f, hit_color, RenderMode::Filled);
+
+            // Draw ray segment inside AABB if t_max is valid
+            if (t_max >= 0.0f && t_max <= ray_length && t_max > t_min) {
+                const auto exit_point = ray_origin + dir_normalized * t_max;
+                add_line(hit_point, exit_point, hit_color);
+                add_sphere(exit_point, 0.05f, hit_color, RenderMode::Filled);
+
+                // Continue ray after exit
+                if (t_max < ray_length) {
+                    const auto ray_end = ray_origin + dir_normalized * ray_length;
+                    add_line(exit_point, ray_end, ray_color * 0.5f);
+                }
+            }
+        } else {
+            // No intersection, draw full ray
+            const auto ray_end = ray_origin + dir_normalized * ray_length;
+            add_line(ray_origin, ray_end, ray_color);
         }
     }
 
-    void GeometryPlugin::render_batch(VkCommandBuffer cmd, const GeometryBatch& batch,
-                                      const InstanceBuffer& instance_buffer, const camera::Mat4& view_proj) {
-        if (batch.instances.empty() || instance_buffer.buffer == VK_NULL_HANDLE) return;
+    void GeometryPlugin::add_coordinate_axes(const camera::Vec3& position, float size) {
+        // X axis (red)
+        add_line(position, position + camera::Vec3{size, 0, 0}, {1, 0, 0});
+        add_sphere(position + camera::Vec3{size, 0, 0}, size * 0.05f, {1, 0, 0}, RenderMode::Filled);
 
-        // Get geometry mesh
-        const auto it = geometry_meshes_.find(batch.type);
-        if (it == geometry_meshes_.end()) return;
-        const auto& mesh = it->second;
+        // Y axis (green)
+        add_line(position, position + camera::Vec3{0, size, 0}, {0, 1, 0});
+        add_sphere(position + camera::Vec3{0, size, 0}, size * 0.05f, {0, 1, 0}, RenderMode::Filled);
 
-        // Select pipeline based on render mode
-        VkPipeline pipeline = VK_NULL_HANDLE;
-        if (batch.mode == RenderMode::Filled) {
-            pipeline = filled_pipeline_;
-        } else if (batch.mode == RenderMode::Wireframe) {
-            pipeline = wireframe_pipeline_;
-        } else if (batch.mode == RenderMode::Both) {
-            // Render twice: first filled, then wireframe
-            render_batch(cmd, {batch.type, RenderMode::Filled, batch.instances}, instance_buffer, view_proj);
-            render_batch(cmd, {batch.type, RenderMode::Wireframe, batch.instances}, instance_buffer, view_proj);
-            return;
-        }
+        // Z axis (blue)
+        add_line(position, position + camera::Vec3{0, 0, size}, {0, 0, 1});
+        add_sphere(position + camera::Vec3{0, 0, size}, size * 0.05f, {0, 0, 1}, RenderMode::Filled);
+    }
 
-        if (pipeline == VK_NULL_HANDLE) return;
-
-        // Bind pipeline
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-
-        // Push view-projection matrix
-        vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float) * 16, view_proj.m.data());
-
-        // Bind vertex buffers (mesh + instances)
-        const VkBuffer vertex_buffers[] = {mesh.vertex_buffer, instance_buffer.buffer};
-        constexpr VkDeviceSize offsets[] = {0, 0};
-        vkCmdBindVertexBuffers(cmd, 0, 2, vertex_buffers, offsets);
-
-        // Bind index buffer
-        if (mesh.index_buffer != VK_NULL_HANDLE) {
-            vkCmdBindIndexBuffer(cmd, mesh.index_buffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(cmd, mesh.index_count, static_cast<uint32_t>(batch.instances.size()), 0, 0, 0);
+    void GeometryPlugin::add_ray_batch(const std::vector<RayInfo>& rays, const camera::Vec3* aabb_min,
+                                       const camera::Vec3* aabb_max) {
+        if (aabb_min && aabb_max) {
+            // Use ray-AABB intersection for each ray
+            for (const auto& ray : rays) {
+                add_ray_with_aabb_intersection(ray.origin, ray.direction, ray.length,
+                                               *aabb_min, *aabb_max, ray.color, {0, 1, 0});
+            }
         } else {
-            vkCmdDraw(cmd, mesh.vertex_count, static_cast<uint32_t>(batch.instances.size()), 0, 0);
+            // Just draw rays
+            for (const auto& ray : rays) {
+                add_ray(ray.origin, ray.direction, ray.length, ray.color);
+            }
         }
     }
 
@@ -1198,6 +1102,374 @@ namespace vk::plugins {
             vmaUnmapMemory(eng.allocator, allocation);
         }
     }
+
+    // ============================================================================
+    // GeometryPlugin Pipeline and Rendering Implementation
+    // ============================================================================
+
+    void GeometryPlugin::create_pipelines(const context::EngineContext& eng) {
+        // Load shaders
+        auto load_shader = [&](const char* filename) -> VkShaderModule {
+            std::ifstream file(std::string("shader/") + filename, std::ios::binary | std::ios::ate);
+            if (!file.is_open()) {
+                throw std::runtime_error(std::format("Failed to open shader file: {}", filename));
+            }
+
+            const size_t file_size = file.tellg();
+            std::vector<char> code(file_size);
+            file.seekg(0);
+            file.read(code.data(), static_cast<std::streamsize>(file_size));
+
+            const VkShaderModuleCreateInfo create_info{
+                .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+                .codeSize = code.size(),
+                .pCode = reinterpret_cast<const uint32_t*>(code.data())
+            };
+
+            VkShaderModule module = VK_NULL_HANDLE;
+            vk_check(vkCreateShaderModule(eng.device, &create_info, nullptr, &module),
+                    "Failed to create shader module");
+            return module;
+        };
+
+        const auto vert_module = load_shader("geometry.vert.spv");
+        const auto frag_module = load_shader("geometry.frag.spv");
+
+        // Push constant for MVP matrix
+        const VkPushConstantRange push_constant{
+            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+            .offset = 0,
+            .size = sizeof(float) * 16
+        };
+
+        const VkPipelineLayoutCreateInfo layout_info{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+            .pushConstantRangeCount = 1,
+            .pPushConstantRanges = &push_constant
+        };
+
+        vk_check(vkCreatePipelineLayout(eng.device, &layout_info, nullptr, &pipeline_layout_),
+                "Failed to create geometry pipeline layout");
+
+        // Shader stages
+        const VkPipelineShaderStageCreateInfo shader_stages[] = {
+            {
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .stage = VK_SHADER_STAGE_VERTEX_BIT,
+                .module = vert_module,
+                .pName = "main"
+            },
+            {
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .module = frag_module,
+                .pName = "main"
+            }
+        };
+
+        // Vertex input bindings (per-vertex and per-instance)
+        const VkVertexInputBindingDescription bindings[] = {
+            {0, sizeof(float) * 6, VK_VERTEX_INPUT_RATE_VERTEX},     // position + normal
+            {1, sizeof(float) * 13, VK_VERTEX_INPUT_RATE_INSTANCE}  // instance data
+        };
+
+        const VkVertexInputAttributeDescription attributes[] = {
+            {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0},                  // position
+            {1, 0, VK_FORMAT_R32G32B32_SFLOAT, sizeof(float) * 3},  // normal
+            {2, 1, VK_FORMAT_R32G32B32_SFLOAT, 0},                  // instance position
+            {3, 1, VK_FORMAT_R32G32B32_SFLOAT, sizeof(float) * 3},  // instance rotation
+            {4, 1, VK_FORMAT_R32G32B32_SFLOAT, sizeof(float) * 6},  // instance scale
+            {5, 1, VK_FORMAT_R32G32B32A32_SFLOAT, sizeof(float) * 9} // instance color + alpha
+        };
+
+        const VkPipelineVertexInputStateCreateInfo vertex_input{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+            .vertexBindingDescriptionCount = 2,
+            .pVertexBindingDescriptions = bindings,
+            .vertexAttributeDescriptionCount = 6,
+            .pVertexAttributeDescriptions = attributes
+        };
+
+        const VkPipelineInputAssemblyStateCreateInfo input_assembly{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+            .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+        };
+
+        const VkPipelineViewportStateCreateInfo viewport_state{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+            .viewportCount = 1,
+            .scissorCount = 1
+        };
+
+        const VkPipelineRasterizationStateCreateInfo rasterizer{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+            .polygonMode = VK_POLYGON_MODE_FILL,
+            .cullMode = VK_CULL_MODE_BACK_BIT,
+            .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+            .lineWidth = 1.0f
+        };
+
+        const VkPipelineMultisampleStateCreateInfo multisampling{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+            .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT
+        };
+
+        const VkPipelineDepthStencilStateCreateInfo depth_stencil{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+            .depthTestEnable = VK_TRUE,
+            .depthWriteEnable = VK_TRUE,
+            .depthCompareOp = VK_COMPARE_OP_LESS
+        };
+
+        const VkPipelineColorBlendAttachmentState color_blend_attachment{
+            .blendEnable = VK_TRUE,
+            .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+            .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+            .colorBlendOp = VK_BLEND_OP_ADD,
+            .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+            .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+            .alphaBlendOp = VK_BLEND_OP_ADD,
+            .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                             VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
+        };
+
+        const VkPipelineColorBlendStateCreateInfo color_blending{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+            .attachmentCount = 1,
+            .pAttachments = &color_blend_attachment
+        };
+
+        constexpr VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+        const VkPipelineDynamicStateCreateInfo dynamic_state{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+            .dynamicStateCount = 2,
+            .pDynamicStates = dynamic_states
+        };
+
+        const VkFormat color_format = VK_FORMAT_B8G8R8A8_UNORM;
+        const VkPipelineRenderingCreateInfo rendering_info{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+            .colorAttachmentCount = 1,
+            .pColorAttachmentFormats = &color_format
+        };
+
+        const VkGraphicsPipelineCreateInfo pipeline_info{
+            .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+            .pNext = &rendering_info,
+            .stageCount = 2,
+            .pStages = shader_stages,
+            .pVertexInputState = &vertex_input,
+            .pInputAssemblyState = &input_assembly,
+            .pViewportState = &viewport_state,
+            .pRasterizationState = &rasterizer,
+            .pMultisampleState = &multisampling,
+            .pDepthStencilState = &depth_stencil,
+            .pColorBlendState = &color_blending,
+            .pDynamicState = &dynamic_state,
+            .layout = pipeline_layout_
+        };
+
+        vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &filled_pipeline_),
+                "Failed to create filled geometry pipeline");
+
+        // Create wireframe pipeline
+        auto wireframe_rasterizer = rasterizer;
+        wireframe_rasterizer.polygonMode = VK_POLYGON_MODE_LINE;
+        wireframe_rasterizer.cullMode = VK_CULL_MODE_NONE;
+
+        auto wireframe_pipeline_info = pipeline_info;
+        wireframe_pipeline_info.pRasterizationState = &wireframe_rasterizer;
+
+        vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &wireframe_pipeline_info, nullptr, &wireframe_pipeline_),
+                "Failed to create wireframe geometry pipeline");
+
+        // Create line pipeline for LINE_LIST topology
+        const VkPipelineInputAssemblyStateCreateInfo line_input_assembly{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+            .topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST
+        };
+
+        auto line_rasterizer = rasterizer;
+        line_rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        line_rasterizer.cullMode = VK_CULL_MODE_NONE;
+        line_rasterizer.lineWidth = 2.0f;
+
+        auto line_pipeline_info = pipeline_info;
+        line_pipeline_info.pInputAssemblyState = &line_input_assembly;
+        line_pipeline_info.pRasterizationState = &line_rasterizer;
+
+        vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &line_pipeline_info, nullptr, &line_pipeline_),
+                "Failed to create line geometry pipeline");
+
+        vkDestroyShaderModule(eng.device, vert_module, nullptr);
+        vkDestroyShaderModule(eng.device, frag_module, nullptr);
+
+        log_success(name(), "Pipelines created → filled, wireframe, and line modes ready");
+    }
+
+    void GeometryPlugin::destroy_pipelines(const context::EngineContext& eng) {
+        if (filled_pipeline_ != VK_NULL_HANDLE) {
+            vkDestroyPipeline(eng.device, filled_pipeline_, nullptr);
+            filled_pipeline_ = VK_NULL_HANDLE;
+        }
+        if (wireframe_pipeline_ != VK_NULL_HANDLE) {
+            vkDestroyPipeline(eng.device, wireframe_pipeline_, nullptr);
+            wireframe_pipeline_ = VK_NULL_HANDLE;
+        }
+        if (line_pipeline_ != VK_NULL_HANDLE) {
+            vkDestroyPipeline(eng.device, line_pipeline_, nullptr);
+            line_pipeline_ = VK_NULL_HANDLE;
+        }
+        if (pipeline_layout_ != VK_NULL_HANDLE) {
+            vkDestroyPipelineLayout(eng.device, pipeline_layout_, nullptr);
+            pipeline_layout_ = VK_NULL_HANDLE;
+        }
+    }
+
+    void GeometryPlugin::create_geometry_meshes(const context::EngineContext& eng) {
+        geometry_meshes_[GeometryType::Sphere] = create_sphere_mesh(eng);
+        geometry_meshes_[GeometryType::Box] = create_box_mesh(eng);
+        geometry_meshes_[GeometryType::Cylinder] = create_cylinder_mesh(eng);
+        geometry_meshes_[GeometryType::Cone] = create_cone_mesh(eng);
+        geometry_meshes_[GeometryType::Torus] = create_torus_mesh(eng);
+        geometry_meshes_[GeometryType::Capsule] = create_capsule_mesh(eng);
+        geometry_meshes_[GeometryType::Plane] = create_plane_mesh(eng);
+        geometry_meshes_[GeometryType::Circle] = create_circle_mesh(eng);
+        geometry_meshes_[GeometryType::Line] = create_line_mesh(eng);
+        geometry_meshes_[GeometryType::Grid] = create_line_mesh(eng);
+        geometry_meshes_[GeometryType::Ray] = create_line_mesh(eng);
+    }
+
+    void GeometryPlugin::destroy_geometry_meshes(const context::EngineContext& eng) {
+        std::println("[CLEANUP]     Freeing {} geometry mesh types", geometry_meshes_.size());
+        for (auto& [type, mesh] : geometry_meshes_) {
+            if (mesh.vertex_buffer != VK_NULL_HANDLE) {
+                std::println("[CLEANUP]       Destroying vertex buffer for geometry type {}", static_cast<int>(type));
+                vmaDestroyBuffer(eng.allocator, mesh.vertex_buffer, mesh.vertex_allocation);
+            }
+            if (mesh.index_buffer != VK_NULL_HANDLE) {
+                std::println("[CLEANUP]       Destroying index buffer for geometry type {}", static_cast<int>(type));
+                vmaDestroyBuffer(eng.allocator, mesh.index_buffer, mesh.index_allocation);
+            }
+        }
+        geometry_meshes_.clear();
+
+        std::println("[CLEANUP]     Freeing {} instance buffers", instance_buffers_.size());
+        for (size_t i = 0; i < instance_buffers_.size(); ++i) {
+            auto& inst_buf = instance_buffers_[i];
+            if (inst_buf.buffer != VK_NULL_HANDLE) {
+                std::println("[CLEANUP]       Destroying instance buffer {}", i);
+                vmaDestroyBuffer(eng.allocator, inst_buf.buffer, inst_buf.allocation);
+            }
+        }
+        instance_buffers_.clear();
+        std::println("[CLEANUP]     All geometry VMA resources freed");
+    }
+
+    void GeometryPlugin::update_instance_buffers(const context::EngineContext& eng) {
+        // Resize instance buffers vector if needed
+        if (instance_buffers_.size() < batches_.size()) {
+            instance_buffers_.resize(batches_.size());
+        }
+
+        for (size_t i = 0; i < batches_.size(); ++i) {
+            const auto& batch = batches_[i];
+            auto& inst_buf = instance_buffers_[i];
+
+            if (batch.instances.empty()) continue;
+
+            const uint32_t required_capacity = static_cast<uint32_t>(batch.instances.size());
+            const VkDeviceSize buffer_size = static_cast<VkDeviceSize>(required_capacity) * sizeof(GeometryInstance);
+
+            // Reallocate if needed
+            if (inst_buf.capacity < required_capacity) {
+                if (inst_buf.buffer != VK_NULL_HANDLE) {
+                    vmaDestroyBuffer(eng.allocator, inst_buf.buffer, inst_buf.allocation);
+                }
+
+                const VkBufferCreateInfo buffer_ci{
+                    .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                    .size = buffer_size,
+                    .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                    .sharingMode = VK_SHARING_MODE_EXCLUSIVE
+                };
+
+                constexpr VmaAllocationCreateInfo alloc_ci{
+                    .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+                    .usage = VMA_MEMORY_USAGE_AUTO
+                };
+
+                VmaAllocationInfo alloc_info{};
+                vk_check(vmaCreateBuffer(eng.allocator, &buffer_ci, &alloc_ci,
+                                        &inst_buf.buffer, &inst_buf.allocation, &alloc_info),
+                        "Failed to create instance buffer");
+
+                inst_buf.capacity = required_capacity;
+            }
+
+            // Update buffer data
+            void* data = nullptr;
+            vmaMapMemory(eng.allocator, inst_buf.allocation, &data);
+            std::memcpy(data, batch.instances.data(), buffer_size);
+            vmaUnmapMemory(eng.allocator, inst_buf.allocation);
+        }
+    }
+
+    void GeometryPlugin::render_batch(VkCommandBuffer cmd, const GeometryBatch& batch,
+                                      const InstanceBuffer& instance_buffer, const camera::Mat4& view_proj) {
+        if (batch.instances.empty()) return;
+
+        const auto mesh_it = geometry_meshes_.find(batch.type);
+        if (mesh_it == geometry_meshes_.end()) return;
+
+        const auto& mesh = mesh_it->second;
+
+        // Choose pipeline based on geometry type and render mode
+        VkPipeline pipeline = filled_pipeline_;
+        if (batch.type == GeometryType::Line || batch.type == GeometryType::Ray || batch.type == GeometryType::Grid) {
+            pipeline = line_pipeline_;
+        } else if (batch.mode == RenderMode::Wireframe) {
+            pipeline = wireframe_pipeline_;
+        }
+
+        // Bind pipeline
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+
+        // Push constants (view-proj matrix)
+        vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float) * 16, view_proj.m.data());
+
+        // Bind vertex buffers
+        const VkBuffer vertex_buffers[] = {mesh.vertex_buffer, instance_buffer.buffer};
+        const VkDeviceSize offsets[] = {0, 0};
+        vkCmdBindVertexBuffers(cmd, 0, 2, vertex_buffers, offsets);
+
+        // Bind index buffer and draw
+        if (mesh.index_buffer != VK_NULL_HANDLE) {
+            vkCmdBindIndexBuffer(cmd, mesh.index_buffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(cmd, mesh.index_count, static_cast<uint32_t>(batch.instances.size()), 0, 0, 0);
+        } else {
+            vkCmdDraw(cmd, mesh.vertex_count, static_cast<uint32_t>(batch.instances.size()), 0, 0);
+        }
+
+        // If RenderMode::Both, render wireframe on top (only for non-line geometries)
+        if (batch.mode == RenderMode::Both && batch.type != GeometryType::Line &&
+            batch.type != GeometryType::Ray && batch.type != GeometryType::Grid) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, wireframe_pipeline_);
+            vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float) * 16, view_proj.m.data());
+            vkCmdBindVertexBuffers(cmd, 0, 2, vertex_buffers, offsets);
+
+            if (mesh.index_buffer != VK_NULL_HANDLE) {
+                vkCmdBindIndexBuffer(cmd, mesh.index_buffer, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(cmd, mesh.index_count, static_cast<uint32_t>(batch.instances.size()), 0, 0, 0);
+            } else {
+                vkCmdDraw(cmd, mesh.vertex_count, static_cast<uint32_t>(batch.instances.size()), 0, 0);
+            }
+        }
+    }
+
+    // ============================================================================
+    // Geometry Mesh Generation
+    // ============================================================================
 
     GeometryPlugin::GeometryMesh GeometryPlugin::create_sphere_mesh(const context::EngineContext& eng, const uint32_t segments) {
         std::vector<float> vertices;
