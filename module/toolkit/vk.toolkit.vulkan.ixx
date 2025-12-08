@@ -5,6 +5,7 @@ module;
 #include <vector>
 #include <vulkan/vulkan.h>
 export module vk.toolkit.vulkan;
+import vk.context;
 import vk.toolkit.log;
 
 namespace vk::toolkit::vulkan {
@@ -22,4 +23,7 @@ namespace vk::toolkit::vulkan {
         log::vk_check(vkCreateShaderModule(device, &create_info, nullptr, &module), "Failed to create shader module");
         return module;
     }
+
+    export void transition_image_layout(const VkCommandBuffer& cmd, const context::AttachmentView& target, VkImageLayout old_layout, VkImageLayout new_layout);
+    export void transition_to_color_attachment(const VkCommandBuffer& cmd, VkImage image, VkImageLayout old_layout);
 } // namespace vk::toolkit::vulkan

@@ -184,7 +184,7 @@ public:
 
         if (pipeline_ == VK_NULL_HANDLE || mesh_.buffer == VK_NULL_HANDLE) return;
 
-        vk::context::transition_image_layout(*ctx.cmd, target, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        vk::toolkit::vulkan::transition_image_layout(*ctx.cmd, target, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
         constexpr VkClearValue clear_value{.color = {{0.05f, 0.06f, 0.08f, 1.0f}}};
         const VkRenderingAttachmentInfo color_attachment{.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = target.view, .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, .storeOp = VK_ATTACHMENT_STORE_OP_STORE, .clearValue = clear_value};
@@ -207,7 +207,7 @@ public:
         vkCmdDraw(*ctx.cmd, mesh_.vertex_count, 1, 0, 0);
 
         vkCmdEndRendering(*ctx.cmd);
-        vk::context::transition_image_layout(*ctx.cmd, target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
+        vk::toolkit::vulkan::transition_image_layout(*ctx.cmd, target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
     }
 
     static void on_post_render(vk::context::PluginContext&) {}

@@ -9,6 +9,7 @@ module;
 #include <string>
 export module vk.engine;
 import vk.context;
+import vk.toolkit.imgui;
 
 namespace vk::engine {
     // Plugin concept - no interfaces, pure concept-based design
@@ -54,11 +55,6 @@ namespace vk::engine {
 
         void begin_frame(uint32_t& image_index, VkCommandBuffer& cmd);
         void end_frame(uint32_t image_index, const VkCommandBuffer& cmd);
-
-        void create_imgui();
-        static void begin_imgui_frame();
-        static void end_imgui_frame(const VkCommandBuffer& cmd, const context::FrameContext& frm);
-        void destroy_imgui() const;
 
         void blit_offscreen_to_swapchain(uint32_t image_index, const VkCommandBuffer& cmd, VkExtent2D extent) const;
 
@@ -108,7 +104,12 @@ namespace vk::engine {
         this->create_swapchain();
         this->create_renderer_targets();
         this->create_command_buffers();
-        this->create_imgui();
+
+        toolkit::imgui::create_imgui(ctx_, swapchain_.swapchain_image_format);
+        mdq_.emplace_back([&] {
+            vkDeviceWaitIdle(ctx_.device);
+            toolkit::imgui::destroy_imgui();
+        });
 
         // Phase 2: Initialize - Create plugin resources
         ctx.frame = new context::FrameContext(make_frame_context(state_.frame_number, 0u, swapchain_.swapchain_extent));
@@ -214,7 +215,7 @@ namespace vk::engine {
                 }(),
                 ...);
 
-            this->begin_imgui_frame();
+            toolkit::imgui::begin_imgui_frame();
             (
                 [&] {
                     if ((plugins.phases() & context::PluginPhase::ImGUI)) {
@@ -222,7 +223,7 @@ namespace vk::engine {
                     }
                 }(),
                 ...);
-            this->end_imgui_frame(cmd, frm);
+            toolkit::imgui::end_imgui_frame(cmd, frm);
 
             // Handle presentation mode
             switch (renderer_caps_.presentation_mode) {

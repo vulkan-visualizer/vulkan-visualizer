@@ -14,6 +14,7 @@ import vk.toolkit.math;
 import vk.toolkit.log;
 
 namespace vk::context {
+    export enum class PresentationMode : uint8_t { EngineBlit, RendererComposite, DirectToSwapchain };
     export struct DescriptorAllocator {
         struct PoolSizeRatio {
             VkDescriptorType type;
@@ -47,7 +48,6 @@ namespace vk::context {
     };
 
     export inline constexpr unsigned int FRAME_OVERLAP = 2;
-    export enum class PresentationMode : uint8_t { EngineBlit, RendererComposite, DirectToSwapchain };
 
 
     export struct AttachmentRequest {
@@ -199,7 +199,4 @@ namespace vk::context {
         uint64_t frame_number{0};
         float delta_time{0.0f};
     };
-
-    export void transition_image_layout(const VkCommandBuffer& cmd, const AttachmentView& target, VkImageLayout old_layout, VkImageLayout new_layout);
-    export void transition_to_color_attachment(const VkCommandBuffer& cmd, VkImage image, VkImageLayout old_layout);
 } // namespace vk::context

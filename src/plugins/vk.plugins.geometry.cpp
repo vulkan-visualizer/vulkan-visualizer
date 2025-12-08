@@ -756,7 +756,7 @@ void vk::plugins::Geometry::on_render(context::PluginContext& ctx) {
     auto& cmd          = *ctx.cmd;
     const auto& target = ctx.frame->color_attachments.front();
 
-    context::transition_image_layout(cmd, target, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    toolkit::vulkan::transition_image_layout(cmd, target, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
     constexpr VkClearValue clear_value{.color = {{0.f, 0.f, 0.f, 1.0f}}};
     VkRenderingAttachmentInfo color_attachment{.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = target.view, .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, .storeOp = VK_ATTACHMENT_STORE_OP_STORE, .clearValue = clear_value};
@@ -803,7 +803,7 @@ void vk::plugins::Geometry::on_render(context::PluginContext& ctx) {
 
     vkCmdEndRendering(cmd);
 
-    context::transition_image_layout(cmd, target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
+    toolkit::vulkan::transition_image_layout(cmd, target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
 }
 void vk::plugins::Geometry::on_cleanup(context::PluginContext& ctx) {
     if (ctx.engine) {
