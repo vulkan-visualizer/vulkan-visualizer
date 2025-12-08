@@ -78,9 +78,9 @@ void vk::context::Camera::update(float dt_sec, int viewport_w, int viewport_h) {
         const float yaw_rad   = state_.fly_yaw_deg * std::numbers::pi_v<float> / 180.0f;
         const float pitch_rad = state_.fly_pitch_deg * std::numbers::pi_v<float> / 180.0f;
 
-        const context::Vec3 fwd{std::cos(pitch_rad) * std::cos(yaw_rad), std::sin(pitch_rad), std::cos(pitch_rad) * std::sin(yaw_rad)};
-        const context::Vec3 right = fwd.cross(context::Vec3{0, 1, 0}).normalized();
-        const context::Vec3 up    = right.cross(fwd).normalized();
+        const toolkit::math::Vec3 fwd{std::cos(pitch_rad) * std::cos(yaw_rad), std::sin(pitch_rad), std::cos(pitch_rad) * std::sin(yaw_rad)};
+        const toolkit::math::Vec3 right = fwd.cross(toolkit::math::Vec3{0, 1, 0}).normalized();
+        const toolkit::math::Vec3 up    = right.cross(fwd).normalized();
 
         if (key_w_) state_.eye += fwd * move;
         if (key_s_) state_.eye -= fwd * move;
@@ -137,9 +137,9 @@ void vk::context::Camera::handle_event(const SDL_Event& event) {
                         const float base          = state_.projection == ProjectionMode::Orthographic ? std::max(1e-4f, state_.ortho_height) : std::max(1e-4f, state_.distance);
                         const float pan_speed     = base * 0.0015f * (key_shift_ ? 4.0f : 1.0f);
                         const float yaw_rad       = state_.yaw_deg * std::numbers::pi_v<float> / 180.0f;
-                        const context::Vec3 right = context::Vec3{std::cos(yaw_rad), 0, std::sin(yaw_rad)}.cross(context::Vec3{0, 1, 0}).normalized();
+                        const toolkit::math::Vec3 right = toolkit::math::Vec3{std::cos(yaw_rad), 0, std::sin(yaw_rad)}.cross(toolkit::math::Vec3{0, 1, 0}).normalized();
                         state_.target -= right * (dx * pan_speed);
-                        state_.target += context::Vec3{0, 1, 0} * (dy * pan_speed);
+                        state_.target += toolkit::math::Vec3{0, 1, 0} * (dy * pan_speed);
                         pan_x_vel_ = -dx * pan_speed * 10.0f;
                         pan_y_vel_ = dy * pan_speed * 10.0f;
                     } else if (rmb_) {
@@ -217,7 +217,7 @@ void vk::context::Camera::handle_event(const SDL_Event& event) {
     default: break;
     }
 }
-vk::context::Vec3 vk::context::Camera::eye_position() const {
+vk::toolkit::math::Vec3 vk::context::Camera::eye_position() const {
     if (state_.mode == CameraMode::Orbit) {
         const float yaw_rad   = state_.yaw_deg * std::numbers::pi_v<float> / 180.0f;
         const float pitch_rad = state_.pitch_deg * std::numbers::pi_v<float> / 180.0f;
@@ -225,7 +225,7 @@ vk::context::Vec3 vk::context::Camera::eye_position() const {
         const float sp        = std::sin(pitch_rad);
         const float cy        = std::cos(yaw_rad);
         const float sy        = std::sin(yaw_rad);
-        const context::Vec3 dir{cp * cy, -sp, cp * sy};
+        const toolkit::math::Vec3 dir{cp * cy, -sp, cp * sy};
         return state_.target - dir * state_.distance;
     }
     return state_.eye;
@@ -244,7 +244,7 @@ void vk::context::Camera::set_projection(ProjectionMode p) {
 }
 void vk::context::Camera::home_view() {
     state_.mode      = CameraMode::Orbit;
-    state_.target    = context::Vec3{0, 0, 0};
+    state_.target    = toolkit::math::Vec3{0, 0, 0};
     state_.yaw_deg   = -45.0f;
     state_.pitch_deg = 25.0f;
     state_.distance  = 5.0f;
@@ -324,7 +324,7 @@ void vk::context::Camera::draw_mini_axis_gizmo() {
     const auto& view = this->view_matrix();
 
     struct AxisInfo {
-        context::Vec3 direction;
+        toolkit::math::Vec3 direction;
         ImU32 color;
         const char* label;
     };
@@ -332,14 +332,14 @@ void vk::context::Camera::draw_mini_axis_gizmo() {
     constexpr std::array axes{AxisInfo{{1, 0, 0}, IM_COL32(255, 80, 80, 255), "X"}, AxisInfo{{0, 1, 0}, IM_COL32(80, 255, 80, 255), "Y"}, AxisInfo{{0, 0, 1}, IM_COL32(100, 140, 255, 255), "Z"}};
 
     struct TransformedAxis {
-        context::Vec3 view_dir;
+        toolkit::math::Vec3 view_dir;
         AxisInfo info;
     };
 
     std::array<TransformedAxis, 3> transformed{};
     for (size_t i = 0; i < 3; ++i) {
         const auto& dir = axes[i].direction;
-        const context::Vec3 view_dir{view.m[0] * dir.x + view.m[4] * dir.y + view.m[8] * dir.z, view.m[1] * dir.x + view.m[5] * dir.y + view.m[9] * dir.z, view.m[2] * dir.x + view.m[6] * dir.y + view.m[10] * dir.z};
+        const toolkit::math::Vec3 view_dir{view.m[0] * dir.x + view.m[4] * dir.y + view.m[8] * dir.z, view.m[1] * dir.x + view.m[5] * dir.y + view.m[9] * dir.z, view.m[2] * dir.x + view.m[6] * dir.y + view.m[10] * dir.z};
         transformed[i] = {view_dir, axes[i]};
     }
 
@@ -383,9 +383,9 @@ void vk::context::Camera::recompute_matrices() {
         const float sp        = std::sin(pitch_rad);
         const float cy        = std::cos(yaw_rad);
         const float sy        = std::sin(yaw_rad);
-        const context::Vec3 dir{cp * cy, -sp, cp * sy};
-        const context::Vec3 eye = state_.target - dir * state_.distance;
-        view_                   = context::Mat4::look_at(eye, state_.target, context::Vec3{0, 1, 0});
+        const toolkit::math::Vec3 dir{cp * cy, -sp, cp * sy};
+        const toolkit::math::Vec3 eye = state_.target - dir * state_.distance;
+        view_                   = toolkit::math::Mat4::look_at(eye, state_.target, toolkit::math::Vec3{0, 1, 0});
     } else {
         const float yaw_rad   = state_.fly_yaw_deg * std::numbers::pi_v<float> / 180.0f;
         const float pitch_rad = state_.fly_pitch_deg * std::numbers::pi_v<float> / 180.0f;
@@ -393,19 +393,19 @@ void vk::context::Camera::recompute_matrices() {
         const float sp        = std::sin(pitch_rad);
         const float cy        = std::cos(yaw_rad);
         const float sy        = std::sin(yaw_rad);
-        const context::Vec3 fwd{cp * cy, sp, cp * sy};
-        view_ = context::Mat4::look_at(state_.eye, state_.eye + fwd, context::Vec3{0, 1, 0});
+        const toolkit::math::Vec3 fwd{cp * cy, sp, cp * sy};
+        view_ = toolkit::math::Mat4::look_at(state_.eye, state_.eye + fwd, toolkit::math::Vec3{0, 1, 0});
     }
 
     // Compute projection matrix
     const float aspect = static_cast<float>(std::max(1, viewport_width_)) / static_cast<float>(std::max(1, viewport_height_));
     if (state_.projection == ProjectionMode::Perspective) {
         const float fov_rad = state_.fov_y_deg * std::numbers::pi_v<float> / 180.0f;
-        proj_               = context::Mat4::perspective(fov_rad, aspect, state_.znear, state_.zfar);
+        proj_               = toolkit::math::Mat4::perspective(fov_rad, aspect, state_.znear, state_.zfar);
     } else {
         // For orthographic, we'll need to implement make_ortho if needed
         const float fov_rad = state_.fov_y_deg * std::numbers::pi_v<float> / 180.0f;
-        proj_               = context::Mat4::perspective(fov_rad, aspect, state_.znear, state_.zfar);
+        proj_               = toolkit::math::Mat4::perspective(fov_rad, aspect, state_.znear, state_.zfar);
     }
 }
 void vk::context::Camera::apply_inertia(float dt) {

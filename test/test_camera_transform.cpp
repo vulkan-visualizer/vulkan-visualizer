@@ -1,235 +1,245 @@
+#include <SDL3/SDL.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <format>
+#include <fstream>
 #include <imgui.h>
 #include <numbers>
 #include <optional>
-#include <ranges>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <vector>
-#include <SDL3/SDL.h>
 #include <vulkan/vulkan.h>
-import vk.engine;
 import vk.context;
+import vk.engine;
+import vk.toolkit.math;
 
 namespace {
-struct ColoredLine {
-    vk::context::Vec3 a{};
-    vk::context::Vec3 b{};
-    ImU32 color{IM_COL32_WHITE};
-};
-
-struct Projector {
-    vk::context::Mat4 view_proj{};
-    float width{1.0f};
-    float height{1.0f};
-
-    [[nodiscard]] std::optional<ImVec2> project(const vk::context::Vec3& p) const {
-        const auto& m = view_proj.m;
-        const float x = m[0] * p.x + m[4] * p.y + m[8] * p.z + m[12];
-        const float y = m[1] * p.x + m[5] * p.y + m[9] * p.z + m[13];
-        const float z = m[2] * p.x + m[6] * p.y + m[10] * p.z + m[14];
-        const float w = m[3] * p.x + m[7] * p.y + m[11] * p.z + m[15];
-
-        if (w <= 0.0f) return std::nullopt;
-        const float inv_w = 1.0f / w;
-        const float ndc_x = x * inv_w;
-        const float ndc_y = y * inv_w;
-        const float ndc_z = z * inv_w;
-
-        // Simple clip rejection to avoid extreme lines; keep z in front of the camera.
-        if (ndc_z < 0.0f || ndc_z > 1.2f) return std::nullopt;
-        if (std::abs(ndc_x) > 1.5f || std::abs(ndc_y) > 1.5f) return std::nullopt;
-
-        const float sx = (ndc_x * 0.5f + 0.5f) * width;
-        const float sy = (-ndc_y * 0.5f + 0.5f) * height;
-        return ImVec2{sx, sy};
-    }
-};
-
-vk::context::Mat4 build_pose(const vk::context::Vec3& position, const vk::context::Vec3& target, const vk::context::Vec3& world_up) {
-    const vk::context::Vec3 forward = (target - position).normalized();
-    vk::context::Vec3 right         = forward.cross(world_up).normalized();
-    vk::context::Vec3 up            = right.cross(forward).normalized();
-
-    vk::context::Mat4 m{};
-    m.m = {right.x,
-        right.y,
-        right.z,
-        0.0f,
-        up.x,
-        up.y,
-        up.z,
-        0.0f,
-        forward.x,
-        forward.y,
-        forward.z,
-        0.0f,
-        position.x,
-        position.y,
-        position.z,
-        1.0f};
-    return m;
-}
-
-std::vector<vk::context::Mat4> generate_nerf_like_camera_path(const std::size_t count, const float radius, const float height_variation) {
-    std::vector<vk::context::Mat4> poses;
-    poses.reserve(count);
-
-    constexpr vk::context::Vec3 target{0.0f, 0.0f, 0.0f};
-    const float two_pi = 2.0f * std::numbers::pi_v<float>;
-
-    for (std::size_t i = 0; i < count; ++i) {
-        const float t        = static_cast<float>(i) / static_cast<float>(count);
-        const float theta    = t * two_pi;
-        const float wobble   = std::sin(theta * 3.0f) * 0.25f;
-        const float distance = radius * (0.8f + 0.15f * std::cos(theta * 0.5f));
-        const float height   = height_variation * std::cos(theta * 1.5f) + wobble * 0.35f;
-
-        const vk::context::Vec3 position{distance * std::cos(theta), height, distance * std::sin(theta)};
-        poses.push_back(build_pose(position, target, vk::context::Vec3{0.0f, 1.0f, 0.0f}));
-    }
-
-    return poses;
-}
-
-vk::context::Vec3 extract_position(const vk::context::Mat4& m) {
-    return vk::context::Vec3{m.m[12], m.m[13], m.m[14]};
-}
-
-std::tuple<vk::context::Vec3, float> compute_center_and_radius(const std::vector<vk::context::Mat4>& poses) {
-    vk::context::Vec3 center{0.0f, 0.0f, 0.0f};
-    for (const auto& p : poses) {
-        center += extract_position(p);
-    }
-    if (!poses.empty()) {
-        center = center / static_cast<float>(poses.size());
-    }
-
-    float average_radius = 0.0f;
-    for (const auto& p : poses) {
-        average_radius += (extract_position(p) - center).length();
-    }
-    if (!poses.empty()) average_radius /= static_cast<float>(poses.size());
-
-    return {center, average_radius};
-}
-
-std::vector<ColoredLine> make_frustum_lines(const std::vector<vk::context::Mat4>& poses, const float near_d, const float far_d, const float fov_deg) {
-    std::vector<ColoredLine> lines;
-    lines.reserve(poses.size() * 12);
-
-    const float fov_rad = fov_deg * std::numbers::pi_v<float> / 180.0f;
-    const float near_h  = std::tan(fov_rad * 0.5f) * near_d;
-    const float near_w  = near_h;
-    const float far_h   = std::tan(fov_rad * 0.5f) * far_d;
-    const float far_w   = far_h;
-    const ImU32 edge    = ImColor(0.95f, 0.76f, 0.32f, 1.0f);
-
-    auto add_line = [&](const vk::context::Vec3& a, const vk::context::Vec3& b) {
-        lines.push_back(ColoredLine{a, b, edge});
+    struct Vertex {
+        vk::toolkit::math::Vec3 pos{};
+        vk::toolkit::math::Vec3 color{};
     };
 
-    for (const auto& pose : poses) {
-        const vk::context::Vec3 origin  = extract_position(pose);
-        const vk::context::Vec3 right   = {pose.m[0], pose.m[1], pose.m[2]};
-        const vk::context::Vec3 up      = {pose.m[4], pose.m[5], pose.m[6]};
-        const vk::context::Vec3 forward = {pose.m[8], pose.m[9], pose.m[10]};
+    struct MeshBuffer {
+        VkBuffer buffer{VK_NULL_HANDLE};
+        VkDeviceMemory memory{VK_NULL_HANDLE};
+        uint32_t vertex_count{0};
+    };
 
-        const auto corner = [&](const float w, const float h, const float d) {
-            return origin + forward * d + right * w + up * h;
+    struct ColoredLine {
+        vk::toolkit::math::Vec3 a{};
+        vk::toolkit::math::Vec3 b{};
+        vk::toolkit::math::Vec3 color{};
+    };
+
+    vk::toolkit::math::Mat4 build_pose(const vk::toolkit::math::Vec3& position, const vk::toolkit::math::Vec3& target, const vk::toolkit::math::Vec3& world_up) {
+        const vk::toolkit::math::Vec3 forward = (target - position).normalized();
+        vk::toolkit::math::Vec3 right         = forward.cross(world_up).normalized();
+        vk::toolkit::math::Vec3 up            = right.cross(forward).normalized();
+
+        vk::toolkit::math::Mat4 m{};
+        m.m = {right.x, right.y, right.z, 0.0f, up.x, up.y, up.z, 0.0f, forward.x, forward.y, forward.z, 0.0f, position.x, position.y, position.z, 1.0f};
+        return m;
+    }
+
+    std::vector<vk::toolkit::math::Mat4> generate_nerf_like_camera_path(std::size_t count, float radius, float height_variation) {
+        std::vector<vk::toolkit::math::Mat4> poses;
+        poses.reserve(count);
+
+        constexpr vk::toolkit::math::Vec3 target{0.0f, 0.0f, 0.0f};
+        const float two_pi = 2.0f * std::numbers::pi_v<float>;
+
+        for (std::size_t i = 0; i < count; ++i) {
+            const float t        = static_cast<float>(i) / static_cast<float>(count);
+            const float theta    = t * two_pi;
+            const float wobble   = std::sin(theta * 3.0f) * 0.25f;
+            const float distance = radius * (0.8f + 0.15f * std::cos(theta * 0.5f));
+            const float height   = height_variation * std::cos(theta * 1.5f) + wobble * 0.35f;
+
+            const vk::toolkit::math::Vec3 position{distance * std::cos(theta), height, distance * std::sin(theta)};
+            poses.push_back(build_pose(position, target, vk::toolkit::math::Vec3{0.0f, 1.0f, 0.0f}));
+        }
+
+        return poses;
+    }
+
+    vk::toolkit::math::Vec3 extract_position(const vk::toolkit::math::Mat4& m) {
+        return vk::toolkit::math::Vec3{m.m[12], m.m[13], m.m[14]};
+    }
+
+    std::tuple<vk::toolkit::math::Vec3, float> compute_center_and_radius(const std::vector<vk::toolkit::math::Mat4>& poses) {
+        vk::toolkit::math::Vec3 center{0.0f, 0.0f, 0.0f};
+        for (const auto& p : poses) {
+            center += extract_position(p);
+        }
+        if (!poses.empty()) {
+            center = center / static_cast<float>(poses.size());
+        }
+
+        float average_radius = 0.0f;
+        for (const auto& p : poses) {
+            average_radius += (extract_position(p) - center).length();
+        }
+        if (!poses.empty()) average_radius /= static_cast<float>(poses.size());
+
+        return {center, average_radius};
+    }
+
+    std::vector<ColoredLine> make_frustum_lines(const std::vector<vk::toolkit::math::Mat4>& poses, float near_d, float far_d, float fov_deg) {
+        std::vector<ColoredLine> lines;
+        lines.reserve(poses.size() * 12);
+
+        const float fov_rad = fov_deg * std::numbers::pi_v<float> / 180.0f;
+        const float near_h  = std::tan(fov_rad * 0.5f) * near_d;
+        const float near_w  = near_h;
+        const float far_h   = std::tan(fov_rad * 0.5f) * far_d;
+        const float far_w   = far_h;
+        const vk::toolkit::math::Vec3 edge_color{0.95f, 0.76f, 0.32f};
+
+        auto add_line = [&](const vk::toolkit::math::Vec3& a, const vk::toolkit::math::Vec3& b) { lines.push_back(ColoredLine{a, b, edge_color}); };
+
+        for (const auto& pose : poses) {
+            const vk::toolkit::math::Vec3 origin  = extract_position(pose);
+            const vk::toolkit::math::Vec3 right   = {pose.m[0], pose.m[1], pose.m[2]};
+            const vk::toolkit::math::Vec3 up      = {pose.m[4], pose.m[5], pose.m[6]};
+            const vk::toolkit::math::Vec3 forward = {pose.m[8], pose.m[9], pose.m[10]};
+
+            const auto corner = [&](float w, float h, float d) { return origin + forward * d + right * w + up * h; };
+
+            const vk::toolkit::math::Vec3 nlt = corner(-near_w, near_h, near_d);
+            const vk::toolkit::math::Vec3 nrt = corner(near_w, near_h, near_d);
+            const vk::toolkit::math::Vec3 nlb = corner(-near_w, -near_h, near_d);
+            const vk::toolkit::math::Vec3 nrb = corner(near_w, -near_h, near_d);
+
+            const vk::toolkit::math::Vec3 flt = corner(-far_w, far_h, far_d);
+            const vk::toolkit::math::Vec3 frt = corner(far_w, far_h, far_d);
+            const vk::toolkit::math::Vec3 flb = corner(-far_w, -far_h, far_d);
+            const vk::toolkit::math::Vec3 frb = corner(far_w, -far_h, far_d);
+
+            add_line(origin, nlt);
+            add_line(origin, nrt);
+            add_line(origin, nlb);
+            add_line(origin, nrb);
+
+            add_line(nlt, nrt);
+            add_line(nrt, nrb);
+            add_line(nrb, nlb);
+            add_line(nlb, nlt);
+
+            add_line(flt, frt);
+            add_line(frt, frb);
+            add_line(frb, flb);
+            add_line(flb, flt);
+
+            add_line(nlt, flt);
+            add_line(nrt, frt);
+            add_line(nlb, flb);
+            add_line(nrb, frb);
+        }
+
+        return lines;
+    }
+
+    std::vector<ColoredLine> make_axis_lines(const std::vector<vk::toolkit::math::Mat4>& poses, float axis_length) {
+        std::vector<ColoredLine> lines;
+        lines.reserve(poses.size() * 3);
+
+        for (const auto& pose : poses) {
+            const vk::toolkit::math::Vec3 origin  = extract_position(pose);
+            const vk::toolkit::math::Vec3 right   = {pose.m[0], pose.m[1], pose.m[2]};
+            const vk::toolkit::math::Vec3 up      = {pose.m[4], pose.m[5], pose.m[6]};
+            const vk::toolkit::math::Vec3 forward = {pose.m[8], pose.m[9], pose.m[10]};
+
+            lines.push_back({origin, origin + right * axis_length, vk::toolkit::math::Vec3{0.94f, 0.33f, 0.31f}});
+            lines.push_back({origin, origin + up * axis_length, vk::toolkit::math::Vec3{0.37f, 0.82f, 0.36f}});
+            lines.push_back({origin, origin + forward * axis_length, vk::toolkit::math::Vec3{0.32f, 0.60f, 1.0f}});
+        }
+
+        return lines;
+    }
+
+    std::vector<ColoredLine> make_path_lines(const std::vector<vk::toolkit::math::Mat4>& poses) {
+        std::vector<ColoredLine> lines;
+        lines.reserve(poses.size());
+        if (poses.size() < 2) return lines;
+
+        const vk::toolkit::math::Vec3 color{0.7f, 0.72f, 0.78f};
+        vk::toolkit::math::Vec3 prev = extract_position(poses.front());
+        for (std::size_t i = 1; i < poses.size(); ++i) {
+            const vk::toolkit::math::Vec3 curr = extract_position(poses[i]);
+            lines.push_back(ColoredLine{prev, curr, color});
+            prev = curr;
+        }
+        lines.push_back(ColoredLine{prev, extract_position(poses.front()), color});
+        return lines;
+    }
+
+    void append_lines(std::vector<Vertex>& out, const std::vector<ColoredLine>& lines) {
+        out.reserve(out.size() + lines.size() * 2);
+        for (const auto& l : lines) {
+            out.push_back(Vertex{l.a, l.color});
+            out.push_back(Vertex{l.b, l.color});
+        }
+    }
+
+    MeshBuffer create_vertex_buffer(const vk::context::EngineContext& eng, std::span<const Vertex> vertices) {
+        MeshBuffer mb{};
+        if (vertices.empty()) return mb;
+
+        const VkDeviceSize size = static_cast<VkDeviceSize>(vertices.size() * sizeof(Vertex));
+
+        const VkBufferCreateInfo buffer_ci{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size, .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
+
+        vk::context::vk_check(vkCreateBuffer(eng.device, &buffer_ci, nullptr, &mb.buffer), "Failed to create vertex buffer");
+
+        VkMemoryRequirements mem_req{};
+        vkGetBufferMemoryRequirements(eng.device, mb.buffer, &mem_req);
+
+        auto find_memory_type = [&](uint32_t type_bits, VkMemoryPropertyFlags properties) -> uint32_t {
+            VkPhysicalDeviceMemoryProperties mem_props{};
+            vkGetPhysicalDeviceMemoryProperties(eng.physical, &mem_props);
+            for (uint32_t i = 0; i < mem_props.memoryTypeCount; ++i) {
+                if ((type_bits & (1u << i)) && (mem_props.memoryTypes[i].propertyFlags & properties) == properties) {
+                    return i;
+                }
+            }
+            throw std::runtime_error("Failed to find suitable memory type");
         };
 
-        const vk::context::Vec3 nlt = corner(-near_w, near_h, near_d);
-        const vk::context::Vec3 nrt = corner(near_w, near_h, near_d);
-        const vk::context::Vec3 nlb = corner(-near_w, -near_h, near_d);
-        const vk::context::Vec3 nrb = corner(near_w, -near_h, near_d);
+        const VkMemoryAllocateInfo alloc_info{.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mem_req.size, .memoryTypeIndex = find_memory_type(mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
 
-        const vk::context::Vec3 flt = corner(-far_w, far_h, far_d);
-        const vk::context::Vec3 frt = corner(far_w, far_h, far_d);
-        const vk::context::Vec3 flb = corner(-far_w, -far_h, far_d);
-        const vk::context::Vec3 frb = corner(far_w, -far_h, far_d);
+        vk::context::vk_check(vkAllocateMemory(eng.device, &alloc_info, nullptr, &mb.memory), "Failed to allocate vertex buffer memory");
+        vk::context::vk_check(vkBindBufferMemory(eng.device, mb.buffer, mb.memory, 0), "Failed to bind vertex buffer memory");
 
-        add_line(origin, nlt);
-        add_line(origin, nrt);
-        add_line(origin, nlb);
-        add_line(origin, nrb);
+        void* mapped = nullptr;
+        vk::context::vk_check(vkMapMemory(eng.device, mb.memory, 0, size, 0, &mapped), "Failed to map vertex buffer memory");
+        std::memcpy(mapped, vertices.data(), static_cast<size_t>(size));
+        vkUnmapMemory(eng.device, mb.memory);
 
-        add_line(nlt, nrt);
-        add_line(nrt, nrb);
-        add_line(nrb, nlb);
-        add_line(nlb, nlt);
-
-        add_line(flt, frt);
-        add_line(frt, frb);
-        add_line(frb, flb);
-        add_line(flb, flt);
-
-        add_line(nlt, flt);
-        add_line(nrt, frt);
-        add_line(nlb, flb);
-        add_line(nrb, frb);
+        mb.vertex_count = static_cast<uint32_t>(vertices.size());
+        return mb;
     }
 
-    return lines;
-}
-
-std::vector<ColoredLine> make_axis_lines(const std::vector<vk::context::Mat4>& poses, const float axis_length) {
-    std::vector<ColoredLine> lines;
-    lines.reserve(poses.size() * 3);
-
-    for (const auto& pose : poses) {
-        const vk::context::Vec3 origin  = extract_position(pose);
-        const vk::context::Vec3 right   = {pose.m[0], pose.m[1], pose.m[2]};
-        const vk::context::Vec3 up      = {pose.m[4], pose.m[5], pose.m[6]};
-        const vk::context::Vec3 forward = {pose.m[8], pose.m[9], pose.m[10]};
-
-        lines.push_back({origin, origin + right * axis_length, ImColor(0.94f, 0.33f, 0.31f, 1.0f)});
-        lines.push_back({origin, origin + up * axis_length, ImColor(0.37f, 0.82f, 0.36f, 1.0f)});
-        lines.push_back({origin, origin + forward * axis_length, ImColor(0.32f, 0.60f, 1.0f, 1.0f)});
-    }
-
-    return lines;
-}
-
-std::vector<ColoredLine> make_path_lines(const std::vector<vk::context::Mat4>& poses) {
-    std::vector<ColoredLine> lines;
-    lines.reserve(poses.size());
-    if (poses.size() < 2) return lines;
-
-    const ImU32 color = ImColor(0.7f, 0.72f, 0.78f, 0.8f);
-    vk::context::Vec3 prev = extract_position(poses.front());
-    for (std::size_t i = 1; i < poses.size(); ++i) {
-        const vk::context::Vec3 curr = extract_position(poses[i]);
-        lines.push_back(ColoredLine{prev, curr, color});
-        prev = curr;
-    }
-    // Close the loop to emphasize the orbit.
-    lines.push_back(ColoredLine{prev, extract_position(poses.front()), color});
-    return lines;
-}
-
-void draw_lines(const Projector& projector, const std::vector<ColoredLine>& lines, const float thickness) {
-    ImDrawList* draw_list = ImGui::GetBackgroundDrawList();
-    for (const auto& l : lines) {
-        const auto a = projector.project(l.a);
-        const auto b = projector.project(l.b);
-        if (a && b) {
-            draw_list->AddLine(*a, *b, l.color, thickness);
+    VkShaderModule load_shader_module(const vk::context::EngineContext& eng, const char* filename) {
+        std::ifstream file(std::string("shader/") + filename, std::ios::binary | std::ios::ate);
+        if (!file.is_open()) {
+            throw std::runtime_error(std::format("Failed to open shader file: {}", filename));
         }
-    }
-}
 
-void draw_matrix(const vk::context::Mat4& m, const char* label) {
-    if (ImGui::TreeNode(label)) {
-        for (int row = 0; row < 4; ++row) {
-            ImGui::Text("%.3f  %.3f  %.3f  %.3f", m.m[0 + row], m.m[4 + row], m.m[8 + row], m.m[12 + row]);
-        }
-        ImGui::TreePop();
+        const size_t file_size = static_cast<size_t>(file.tellg());
+        std::vector<char> code(file_size);
+        file.seekg(0);
+        file.read(code.data(), static_cast<std::streamsize>(file_size));
+
+        const VkShaderModuleCreateInfo create_info{.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = code.size(), .pCode = reinterpret_cast<const uint32_t*>(code.data())};
+
+        VkShaderModule module = VK_NULL_HANDLE;
+        vk::context::vk_check(vkCreateShaderModule(eng.device, &create_info, nullptr, &module), "Failed to create shader module");
+        return module;
     }
-}
 } // namespace
 
 class CameraTransformPlugin {
@@ -238,7 +248,7 @@ public:
 
     [[nodiscard]] static constexpr vk::context::PluginPhase phases() noexcept {
         using vk::context::PluginPhase;
-        return PluginPhase::Setup | PluginPhase::Initialize | PluginPhase::PreRender | PluginPhase::Render | PluginPhase::ImGUI;
+        return PluginPhase::Setup | PluginPhase::Initialize | PluginPhase::PreRender | PluginPhase::Render | PluginPhase::ImGUI | PluginPhase::Cleanup;
     }
 
     void on_setup(const vk::context::PluginContext& ctx) {
@@ -248,12 +258,12 @@ public:
         ctx.caps->preferred_swapchain_format = VK_FORMAT_B8G8R8A8_UNORM;
         ctx.caps->color_samples              = VK_SAMPLE_COUNT_1_BIT;
         ctx.caps->uses_depth                 = VK_FALSE;
-        ctx.caps->color_attachments          = {vk::context::AttachmentRequest{.name = "color", .format = VK_FORMAT_B8G8R8A8_UNORM, .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, .samples = VK_SAMPLE_COUNT_1_BIT, .aspect = VK_IMAGE_ASPECT_COLOR_BIT, .initial_layout = VK_IMAGE_LAYOUT_GENERAL}};
-        ctx.caps->presentation_attachment    = "color";
+        ctx.caps->color_attachments       = {vk::context::AttachmentRequest{.name = "color", .format = VK_FORMAT_B8G8R8A8_UNORM, .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, .samples = VK_SAMPLE_COUNT_1_BIT, .aspect = VK_IMAGE_ASPECT_COLOR_BIT, .initial_layout = VK_IMAGE_LAYOUT_GENERAL}};
+        ctx.caps->presentation_attachment = "color";
     }
 
     void on_initialize(vk::context::PluginContext&) {
-        poses_ = generate_nerf_like_camera_path(24, 4.0f, 0.6f);
+        poses_                             = generate_nerf_like_camera_path(28, 4.0f, 0.6f);
         std::tie(center_, average_radius_) = compute_center_and_radius(poses_);
 
         const float frustum_near = std::max(0.12f, average_radius_ * 0.06f);
@@ -273,6 +283,8 @@ public:
             s.zfar      = std::max(50.0f, average_radius_ * 6.0f);
             camera_->set_state(s);
         }
+
+        rebuild_mesh_buffer_ = true;
     }
 
     void on_pre_render(vk::context::PluginContext& ctx) {
@@ -282,11 +294,25 @@ public:
             viewport_height_ = ctx.frame->extent.height;
         }
         camera_->update(ctx.delta_time, static_cast<int>(viewport_width_), static_cast<int>(viewport_height_));
+
+        if (rebuild_mesh_buffer_ && ctx.engine) {
+            rebuild_mesh_buffer_ = false;
+            build_mesh(*ctx.engine);
+        }
     }
 
     void on_render(vk::context::PluginContext& ctx) {
         if (!ctx.cmd || !ctx.frame || ctx.frame->color_attachments.empty()) return;
+        if (!ctx.engine) return;
         const auto& target = ctx.frame->color_attachments.front();
+
+        // Recreate pipeline if swapchain format changed
+        if (color_format_ != target.format) {
+            destroy_pipeline(*ctx.engine);
+            create_pipeline(*ctx.engine, target.format);
+        }
+
+        if (pipeline_ == VK_NULL_HANDLE || mesh_.buffer == VK_NULL_HANDLE) return;
 
         vk::context::transition_image_layout(*ctx.cmd, target, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
@@ -294,42 +320,46 @@ public:
         const VkRenderingAttachmentInfo color_attachment{.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = target.view, .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, .storeOp = VK_ATTACHMENT_STORE_OP_STORE, .clearValue = clear_value};
         const VkRenderingInfo render_info{.sType = VK_STRUCTURE_TYPE_RENDERING_INFO, .renderArea = {{0, 0}, ctx.frame->extent}, .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = &color_attachment};
         vkCmdBeginRendering(*ctx.cmd, &render_info);
-        vkCmdEndRendering(*ctx.cmd);
 
+        const VkViewport viewport{.x = 0.0f, .y = 0.0f, .width = static_cast<float>(ctx.frame->extent.width), .height = static_cast<float>(ctx.frame->extent.height), .minDepth = 0.0f, .maxDepth = 1.0f};
+        const VkRect2D scissor{{0, 0}, ctx.frame->extent};
+        vkCmdSetViewport(*ctx.cmd, 0, 1, &viewport);
+        vkCmdSetScissor(*ctx.cmd, 0, 1, &scissor);
+        vkCmdSetLineWidth(*ctx.cmd, 1.6f);
+
+        vkCmdBindPipeline(*ctx.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
+        const VkDeviceSize offsets[] = {0};
+        vkCmdBindVertexBuffers(*ctx.cmd, 0, 1, &mesh_.buffer, offsets);
+
+        const auto mvp = camera_->proj_matrix() * camera_->view_matrix();
+        vkCmdPushConstants(*ctx.cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float) * 16, mvp.m.data());
+
+        vkCmdDraw(*ctx.cmd, mesh_.vertex_count, 1, 0, 0);
+
+        vkCmdEndRendering(*ctx.cmd);
         vk::context::transition_image_layout(*ctx.cmd, target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
     }
 
     static void on_post_render(vk::context::PluginContext&) {}
 
-    void on_imgui(vk::context::PluginContext& ctx) {
-        if (!camera_ || !ctx.frame) return;
-        camera_->draw_mini_axis_gizmo();
-        overlay_scale_ = std::clamp(std::min(ctx.frame->extent.width, ctx.frame->extent.height) / 900.0f, 0.75f, 1.8f);
-
-        const auto view_proj = camera_->proj_matrix() * camera_->view_matrix();
-        const Projector projector{view_proj, static_cast<float>(ctx.frame->extent.width), static_cast<float>(ctx.frame->extent.height)};
-
-        if (show_frustums_) draw_lines(projector, frustum_lines_, 1.5f * overlay_scale_);
-        if (show_axes_) draw_lines(projector, axis_lines_, 2.2f * overlay_scale_);
-        if (show_path_) draw_lines(projector, path_lines_, 1.1f * overlay_scale_);
-
-        ImGui::SetNextWindowBgAlpha(0.85f);
+    void on_imgui(vk::context::PluginContext&) {
+        ImGui::SetNextWindowBgAlpha(0.9f);
         if (ImGui::Begin("Camera Transform Debug")) {
-            ImGui::TextUnformatted("Nerf-style synthetic poses");
-            ImGui::Separator();
+            ImGui::TextUnformatted("Vulkan line-rendered frustums");
             ImGui::Text("Poses: %zu", poses_.size());
-            ImGui::Text("Centroid: [%.2f, %.2f, %.2f]", center_.x, center_.y, center_.z);
+            ImGui::Text("Center: [%.2f, %.2f, %.2f]", center_.x, center_.y, center_.z);
             ImGui::Text("Average radius: %.2f", average_radius_);
-            ImGui::Checkbox("Show frustums", &show_frustums_);
-            ImGui::Checkbox("Show axis triads", &show_axes_);
-            ImGui::Checkbox("Show path", &show_path_);
-            ImGui::SliderFloat("Overlay scale", &overlay_scale_, 0.5f, 2.5f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 
             if (ImGui::CollapsingHeader("Sample transforms", ImGuiTreeNodeFlags_DefaultOpen)) {
-                const std::size_t preview_count = std::min<std::size_t>(poses_.size(), 3);
-                for (std::size_t i = 0; i < preview_count; ++i) {
+                for (std::size_t i = 0; i < poses_.size(); ++i) {
                     const std::string label = std::format("pose [{}]", i);
-                    draw_matrix(poses_[i], label.c_str());
+                    if (ImGui::TreeNode(label.c_str())) {
+                        const auto& m = poses_[i].m;
+                        for (int row = 0; row < 4; ++row) {
+                            ImGui::Text("%.3f  %.3f  %.3f  %.3f", m[0 + row], m[4 + row], m[8 + row], m[12 + row]);
+                        }
+                        ImGui::TreePop();
+                    }
                 }
             }
         }
@@ -338,11 +368,12 @@ public:
 
     static void on_present(vk::context::PluginContext&) {}
 
-    void on_cleanup(vk::context::PluginContext&) {
-        frustum_lines_.clear();
-        axis_lines_.clear();
-        path_lines_.clear();
-        poses_.clear();
+    void on_cleanup(vk::context::PluginContext& ctx) {
+        if (ctx.engine) {
+            vkDeviceWaitIdle(ctx.engine->device);
+            destroy_mesh(*ctx.engine);
+            destroy_pipeline(*ctx.engine);
+        }
     }
 
     void on_event(const SDL_Event& event) {
@@ -352,25 +383,114 @@ public:
         camera_->handle_event(event);
     }
 
-    void on_resize(const uint32_t width, const uint32_t height) {
+    void on_resize(uint32_t width, uint32_t height) {
         viewport_width_  = width;
         viewport_height_ = height;
+        color_format_    = VK_FORMAT_UNDEFINED;
     }
 
 private:
+    void build_mesh(const vk::context::EngineContext& eng) {
+        destroy_mesh(eng);
+        std::vector<Vertex> vertices;
+        append_lines(vertices, frustum_lines_);
+        append_lines(vertices, axis_lines_);
+        append_lines(vertices, path_lines_);
+        mesh_ = create_vertex_buffer(eng, vertices);
+    }
+
+    void create_pipeline(const vk::context::EngineContext& eng, VkFormat color_format) {
+        color_format_ = color_format;
+
+        const auto vert_module = load_shader_module(eng, "test_camera_transform.vert.spv");
+        const auto frag_module = load_shader_module(eng, "test_camera_transform.frag.spv");
+
+        const VkPushConstantRange push_constant{.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0, .size = sizeof(float) * 16};
+        const VkPipelineLayoutCreateInfo layout_info{.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .pushConstantRangeCount = 1, .pPushConstantRanges = &push_constant};
+        vk::context::vk_check(vkCreatePipelineLayout(eng.device, &layout_info, nullptr, &pipeline_layout_), "Failed to create pipeline layout");
+
+        const VkPipelineShaderStageCreateInfo vert_stage{.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = vert_module, .pName = "main"};
+        const VkPipelineShaderStageCreateInfo frag_stage{.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = frag_module, .pName = "main"};
+        const VkPipelineShaderStageCreateInfo stages[] = {vert_stage, frag_stage};
+
+        const VkVertexInputBindingDescription binding{.binding = 0, .stride = sizeof(Vertex), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX};
+        const VkVertexInputAttributeDescription attributes[] = {
+            {.location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Vertex, pos)},
+            {.location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Vertex, color)},
+        };
+
+        const VkPipelineVertexInputStateCreateInfo vertex_input{.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO, .vertexBindingDescriptionCount = 1, .pVertexBindingDescriptions = &binding, .vertexAttributeDescriptionCount = 2, .pVertexAttributeDescriptions = attributes};
+
+        const VkPipelineInputAssemblyStateCreateInfo input_assembly{.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, .topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST};
+
+        const VkPipelineViewportStateCreateInfo viewport_state{.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1, .scissorCount = 1};
+
+        const VkPipelineRasterizationStateCreateInfo rasterizer{.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO, .polygonMode = VK_POLYGON_MODE_FILL, .cullMode = VK_CULL_MODE_NONE, .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE, .lineWidth = 1.5f};
+
+        const VkPipelineMultisampleStateCreateInfo msaa{.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
+
+        const VkPipelineColorBlendAttachmentState color_blend_attachment{.blendEnable = VK_FALSE, .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT};
+        const VkPipelineColorBlendStateCreateInfo color_blend{.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, .attachmentCount = 1, .pAttachments = &color_blend_attachment};
+
+        const VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_LINE_WIDTH};
+        const VkPipelineDynamicStateCreateInfo dynamic_state{.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = 3, .pDynamicStates = dynamic_states};
+
+        VkPipelineRenderingCreateInfo rendering_info{.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO, .colorAttachmentCount = 1, .pColorAttachmentFormats = &color_format_};
+
+        const VkGraphicsPipelineCreateInfo pipeline_info{.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+            .pNext                                              = &rendering_info,
+            .stageCount                                         = 2,
+            .pStages                                            = stages,
+            .pVertexInputState                                  = &vertex_input,
+            .pInputAssemblyState                                = &input_assembly,
+            .pViewportState                                     = &viewport_state,
+            .pRasterizationState                                = &rasterizer,
+            .pMultisampleState                                  = &msaa,
+            .pDepthStencilState                                 = nullptr,
+            .pColorBlendState                                   = &color_blend,
+            .pDynamicState                                      = &dynamic_state,
+            .layout                                             = pipeline_layout_,
+            .renderPass                                         = VK_NULL_HANDLE,
+            .subpass                                            = 0};
+
+        vk::context::vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline_), "Failed to create frustum pipeline");
+
+        vkDestroyShaderModule(eng.device, vert_module, nullptr);
+        vkDestroyShaderModule(eng.device, frag_module, nullptr);
+    }
+
+    void destroy_mesh(const vk::context::EngineContext& eng) {
+        if (mesh_.buffer != VK_NULL_HANDLE) {
+            vkDestroyBuffer(eng.device, mesh_.buffer, nullptr);
+        }
+        if (mesh_.memory != VK_NULL_HANDLE) {
+            vkFreeMemory(eng.device, mesh_.memory, nullptr);
+        }
+        mesh_ = {};
+    }
+
+    void destroy_pipeline(const vk::context::EngineContext& eng) {
+        if (pipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(eng.device, pipeline_, nullptr);
+        if (pipeline_layout_ != VK_NULL_HANDLE) vkDestroyPipelineLayout(eng.device, pipeline_layout_, nullptr);
+        pipeline_        = VK_NULL_HANDLE;
+        pipeline_layout_ = VK_NULL_HANDLE;
+    }
+
     std::shared_ptr<vk::context::Camera> camera_{};
-    std::vector<vk::context::Mat4> poses_{};
+    std::vector<vk::toolkit::math::Mat4> poses_{};
     std::vector<ColoredLine> frustum_lines_{};
     std::vector<ColoredLine> axis_lines_{};
     std::vector<ColoredLine> path_lines_{};
-    vk::context::Vec3 center_{0.0f, 0.0f, 0.0f};
+    vk::toolkit::math::Vec3 center_{0.0f, 0.0f, 0.0f};
     float average_radius_{4.0f};
-    float overlay_scale_{1.0f};
     uint32_t viewport_width_{1280};
     uint32_t viewport_height_{720};
-    bool show_frustums_{true};
-    bool show_axes_{true};
-    bool show_path_{true};
+
+    MeshBuffer mesh_{};
+    VkPipelineLayout pipeline_layout_{VK_NULL_HANDLE};
+    VkPipeline pipeline_{VK_NULL_HANDLE};
+    VkFormat color_format_{VK_FORMAT_UNDEFINED};
+    bool rebuild_mesh_buffer_{false};
 };
 
 int main() {

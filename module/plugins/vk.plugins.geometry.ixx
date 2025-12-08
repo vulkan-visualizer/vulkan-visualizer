@@ -8,6 +8,7 @@ module;
 #include <vulkan/vulkan.h>
 export module vk.plugins.geometry;
 import vk.context;
+import vk.toolkit.math;
 
 namespace vk::plugins {
     export enum class GeometryType : uint8_t {
@@ -54,10 +55,10 @@ namespace vk::plugins {
         uint32_t capacity{0};
     };
     export struct GeometryInstance {
-        context::Vec3 position{0, 0, 0};
-        context::Vec3 rotation{0, 0, 0}; // Euler angles in degrees
-        context::Vec3 scale{1, 1, 1};
-        context::Vec3 color{1, 1, 1};
+        toolkit::math::Vec3 position{0, 0, 0};
+        toolkit::math::Vec3 rotation{0, 0, 0}; // Euler angles in degrees
+        toolkit::math::Vec3 scale{1, 1, 1};
+        toolkit::math::Vec3 color{1, 1, 1};
         float alpha{1.0f};
     };
     export enum class RenderMode : uint8_t { Filled, Wireframe, Both };
@@ -103,7 +104,7 @@ namespace vk::plugins {
         void create_geometry_meshes(const context::EngineContext& eng);
         void destroy_geometry_meshes(const context::EngineContext& eng);
         void update_instance_buffers(const context::EngineContext& eng);
-        void render_batch(VkCommandBuffer& cmd, const GeometryBatch& batch, const InstanceBuffer& instance_buffer, const context::Mat4& view_proj);
+        void render_batch(VkCommandBuffer& cmd, const GeometryBatch& batch, const InstanceBuffer& instance_buffer, const toolkit::math::Mat4& view_proj);
 
     private:
         std::shared_ptr<context::Camera> camera_{nullptr};

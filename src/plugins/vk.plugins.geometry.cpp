@@ -650,9 +650,9 @@ vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_face_normal_mesh(con
     line_vertices.reserve(indices.size() * 4); // rough guess
     line_indices.reserve(indices.size() * 2);
 
-    const auto normalize = [](const context::Vec3& v) {
+    const auto normalize = [](const toolkit::math::Vec3& v) {
         const float len = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-        return len > 0.0f ? v / len : context::Vec3{0, 1, 0};
+        return len > 0.0f ? v / len : toolkit::math::Vec3{0, 1, 0};
     };
 
     for (size_t i = 0; i + 2 < indices.size(); i += 3) {
@@ -663,9 +663,9 @@ vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_face_normal_mesh(con
             continue;
         }
 
-        const context::Vec3 p0{vertices[i0 * stride + 0], vertices[i0 * stride + 1], vertices[i0 * stride + 2]};
-        const context::Vec3 p1{vertices[i1 * stride + 0], vertices[i1 * stride + 1], vertices[i1 * stride + 2]};
-        const context::Vec3 p2{vertices[i2 * stride + 0], vertices[i2 * stride + 1], vertices[i2 * stride + 2]};
+        const toolkit::math::Vec3 p0{vertices[i0 * stride + 0], vertices[i0 * stride + 1], vertices[i0 * stride + 2]};
+        const toolkit::math::Vec3 p1{vertices[i1 * stride + 0], vertices[i1 * stride + 1], vertices[i1 * stride + 2]};
+        const toolkit::math::Vec3 p2{vertices[i2 * stride + 0], vertices[i2 * stride + 1], vertices[i2 * stride + 2]};
 
         const auto edge1  = p1 - p0;
         const auto edge2  = p2 - p0;
@@ -1087,7 +1087,7 @@ void vk::plugins::Geometry::update_instance_buffers(const context::EngineContext
         vmaUnmapMemory(eng.allocator, allocation);
     }
 }
-void vk::plugins::Geometry::render_batch(VkCommandBuffer& cmd, const GeometryBatch& batch, const InstanceBuffer& instance_buffer, const context::Mat4& view_proj) {
+void vk::plugins::Geometry::render_batch(VkCommandBuffer& cmd, const GeometryBatch& batch, const InstanceBuffer& instance_buffer, const toolkit::math::Mat4& view_proj) {
     if (batch.instances.empty()) return;
 
     const auto mesh_it = geometry_meshes_.find(batch.type);
