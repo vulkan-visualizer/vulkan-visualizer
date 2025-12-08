@@ -122,8 +122,9 @@ target_sources(vk_vis
         PRIVATE
         src/vk.engine.cpp
         src/vk.context.cpp
-        src/vk.camera.cpp
-        src/vk.plugins.cpp
+        src/plugins/vk.plugins.geometry.cpp
+        src/plugins/vk.plugins.screenshot.cpp
+        src/plugins/vk.plugins.viewport3d.cpp
         ${_VK_BOOTSTRAP_SOURCES}
         ${_VMA_IMPL}
         ${_STB_IMPL}
@@ -131,8 +132,9 @@ target_sources(vk_vis
         PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
         module/vk.engine.ixx
         module/vk.context.ixx
-        module/vk.camera.ixx
-        module/vk.plugins.ixx
+        module/plugins/vk.plugins.geometry.ixx
+        module/plugins/vk.plugins.screenshot.ixx
+        module/plugins/vk.plugins.viewport3d.ixx
 )
 target_link_libraries(vk_vis PUBLIC Vulkan::Vulkan)
 if (TARGET SDL3-shared)

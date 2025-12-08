@@ -1,6 +1,8 @@
 module;
 #include "VkBootstrap.h"
 #include <SDL3/SDL.h>
+#include <backends/imgui_impl_sdl3.h>
+#include <backends/imgui_impl_vulkan.h>
 #include <functional>
 #include <print>
 #include <ranges>
@@ -12,15 +14,13 @@ namespace vk::engine {
     // Plugin concept - no interfaces, pure concept-based design
     export template <typename T>
     concept CPlugin = requires(T plugin, context::PluginContext& ctx, const SDL_Event& event, uint32_t w, uint32_t h) {
-        { plugin.name() } -> std::convertible_to<const char*>;
         { plugin.phases() } -> std::convertible_to<context::PluginPhase>;
-        { plugin.is_enabled() } -> std::convertible_to<bool>;
-        { plugin.set_enabled(true) };
         { plugin.on_setup(ctx) };
         { plugin.on_initialize(ctx) };
         { plugin.on_pre_render(ctx) };
         { plugin.on_render(ctx) };
         { plugin.on_post_render(ctx) };
+        { plugin.on_imgui(ctx) };
         { plugin.on_present(ctx) };
         { plugin.on_cleanup(ctx) };
         { plugin.on_event(event) };
@@ -53,12 +53,14 @@ namespace vk::engine {
         void destroy_command_buffers();
 
         void begin_frame(uint32_t& image_index, VkCommandBuffer& cmd);
-        void end_frame(uint32_t image_index, VkCommandBuffer cmd);
+        void end_frame(uint32_t image_index, VkCommandBuffer& cmd);
 
         void create_imgui();
+        void begin_imgui_frame();
+        void end_imgui_frame(VkCommandBuffer& cmd, context::FrameContext& frm);
         void destroy_imgui();
 
-        void blit_offscreen_to_swapchain(uint32_t image_index, VkCommandBuffer cmd, VkExtent2D extent);
+        void blit_offscreen_to_swapchain(uint32_t image_index, VkCommandBuffer& cmd, VkExtent2D extent);
 
     private:
         context::FrameContext make_frame_context(uint64_t frame_index, uint32_t image_index, VkExtent2D extent);
@@ -94,7 +96,7 @@ namespace vk::engine {
         context::PluginContext ctx{&ctx_, nullptr, &renderer_caps_, nullptr, nullptr, 0, 0.0f};
         (
             [&] {
-                if (plugins.is_enabled() && (plugins.phases() & context::PluginPhase::Setup)) {
+                if ((plugins.phases() & context::PluginPhase::Setup)) {
                     plugins.on_setup(ctx);
                 }
             }(),
@@ -106,12 +108,13 @@ namespace vk::engine {
         this->create_swapchain();
         this->create_renderer_targets();
         this->create_command_buffers();
+        this->create_imgui();
 
         // Phase 2: Initialize - Create plugin resources
         ctx.frame = new context::FrameContext(make_frame_context(state_.frame_number, 0u, swapchain_.swapchain_extent));
         (
             [&] {
-                if (plugins.is_enabled() && (plugins.phases() & context::PluginPhase::Initialize)) {
+                if ((plugins.phases() & context::PluginPhase::Initialize)) {
                     plugins.on_initialize(ctx);
                     mdq_.emplace_back([this, &plugins] {
                         context::PluginContext cleanup_ctx{};
@@ -150,28 +153,22 @@ namespace vk::engine {
                 case SDL_EVENT_WINDOW_FOCUS_LOST: state_.focused = false; break;
                 case SDL_EVENT_WINDOW_RESIZED:
                 case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: state_.resize_requested = true; break;
+                case SDL_EVENT_KEY_DOWN:
+                    {
+                        if (e.key.key == SDLK_ESCAPE) state_.running = false;
+                    }
+                    break;
                 default: break;
                 }
 
                 // Dispatch events to plugins
-                (
-                    [&] {
-                        if (plugins.is_enabled()) {
-                            plugins.on_event(e);
-                        }
-                    }(),
-                    ...);
+                ([&] { plugins.on_event(e); }(), ...);
+                ImGui_ImplSDL3_ProcessEvent(&e);
             }
 
             if (state_.resize_requested) {
                 recreate_swapchain();
-                (
-                    [&] {
-                        if (plugins.is_enabled()) {
-                            plugins.on_resize(swapchain_.swapchain_extent.width, swapchain_.swapchain_extent.height);
-                        }
-                    }(),
-                    ...);
+                ([&] { plugins.on_resize(swapchain_.swapchain_extent.width, swapchain_.swapchain_extent.height); }(), ...);
                 state_.resize_requested = false;
                 continue;
             }
@@ -193,7 +190,7 @@ namespace vk::engine {
             // Phase: PreRender (update logic, prepare data)
             (
                 [&] {
-                    if (plugins.is_enabled() && (plugins.phases() & context::PluginPhase::PreRender)) {
+                    if ((plugins.phases() & context::PluginPhase::PreRender)) {
                         plugins.on_pre_render(plugin_ctx);
                     }
                 }(),
@@ -202,7 +199,7 @@ namespace vk::engine {
             // Phase: Render (graphics commands)
             (
                 [&] {
-                    if (plugins.is_enabled() && (plugins.phases() & context::PluginPhase::Render)) {
+                    if ((plugins.phases() & context::PluginPhase::Render)) {
                         plugins.on_render(plugin_ctx);
                     }
                 }(),
@@ -211,11 +208,21 @@ namespace vk::engine {
             // Phase: PostRender (UI, overlays)
             (
                 [&] {
-                    if (plugins.is_enabled() && (plugins.phases() & context::PluginPhase::PostRender)) {
+                    if ((plugins.phases() & context::PluginPhase::PostRender)) {
                         plugins.on_post_render(plugin_ctx);
                     }
                 }(),
                 ...);
+
+            this->begin_imgui_frame();
+            (
+                [&] {
+                    if ((plugins.phases() & context::PluginPhase::ImGUI)) {
+                        plugins.on_imgui(plugin_ctx);
+                    }
+                }(),
+                ...);
+            this->end_imgui_frame(cmd, frm);
 
             // Handle presentation mode
             switch (renderer_caps_.presentation_mode) {
@@ -228,7 +235,7 @@ namespace vk::engine {
             // Phase: Present (post-processing before present)
             (
                 [&] {
-                    if (plugins.is_enabled() && (plugins.phases() & context::PluginPhase::Present)) {
+                    if ((plugins.phases() & context::PluginPhase::Present)) {
                         plugins.on_present(plugin_ctx);
                     }
                 }(),
