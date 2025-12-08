@@ -1217,6 +1217,97 @@ namespace vk::plugins {
         }
     }
 
+    void GeometryPlugin::destroy_mesh(const context::EngineContext& eng, GeometryMesh& mesh) const {
+        if (mesh.vertex_buffer != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(eng.allocator, mesh.vertex_buffer, mesh.vertex_allocation);
+            mesh.vertex_buffer = VK_NULL_HANDLE;
+        }
+        if (mesh.index_buffer != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(eng.allocator, mesh.index_buffer, mesh.index_allocation);
+            mesh.index_buffer = VK_NULL_HANDLE;
+        }
+    }
+
+    GeometryPlugin::GeometryMesh GeometryPlugin::create_face_normal_mesh(
+        const context::EngineContext& eng,
+        const std::vector<float>& vertices,
+        const std::vector<uint32_t>& indices) const {
+
+        constexpr uint32_t stride = 6; // position + normal
+        if (vertices.size() < stride || indices.size() < 3) {
+            return {};
+        }
+
+        std::vector<float> line_vertices;
+        std::vector<uint32_t> line_indices;
+        line_vertices.reserve(indices.size() * 4); // rough guess
+        line_indices.reserve(indices.size() * 2);
+
+        const auto normalize = [](const camera::Vec3& v) {
+            const float len = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+            return len > 0.0f ? v / len : camera::Vec3{0, 1, 0};
+        };
+
+        for (size_t i = 0; i + 2 < indices.size(); i += 3) {
+            const auto i0 = static_cast<size_t>(indices[i]);
+            const auto i1 = static_cast<size_t>(indices[i + 1]);
+            const auto i2 = static_cast<size_t>(indices[i + 2]);
+            if ((i0 + 1) * stride > vertices.size() ||
+                (i1 + 1) * stride > vertices.size() ||
+                (i2 + 1) * stride > vertices.size()) {
+                continue;
+            }
+
+            const camera::Vec3 p0{vertices[i0 * stride + 0], vertices[i0 * stride + 1], vertices[i0 * stride + 2]};
+            const camera::Vec3 p1{vertices[i1 * stride + 0], vertices[i1 * stride + 1], vertices[i1 * stride + 2]};
+            const camera::Vec3 p2{vertices[i2 * stride + 0], vertices[i2 * stride + 1], vertices[i2 * stride + 2]};
+
+            const auto edge1 = p1 - p0;
+            const auto edge2 = p2 - p0;
+            const auto normal = normalize(edge1.cross(edge2));
+            const auto center = (p0 + p1 + p2) / 3.0f;
+
+            const auto start = center;
+            const auto end = center + normal * normal_length_;
+
+            const uint32_t base_index = static_cast<uint32_t>(line_vertices.size() / stride);
+
+            // start
+            line_vertices.push_back(start.x);
+            line_vertices.push_back(start.y);
+            line_vertices.push_back(start.z);
+            line_vertices.push_back(normal.x);
+            line_vertices.push_back(normal.y);
+            line_vertices.push_back(normal.z);
+            // end
+            line_vertices.push_back(end.x);
+            line_vertices.push_back(end.y);
+            line_vertices.push_back(end.z);
+            line_vertices.push_back(normal.x);
+            line_vertices.push_back(normal.y);
+            line_vertices.push_back(normal.z);
+
+            line_indices.push_back(base_index);
+            line_indices.push_back(base_index + 1);
+        }
+
+        if (line_vertices.empty()) {
+            return {};
+        }
+
+        GeometryMesh mesh;
+        mesh.vertex_count = static_cast<uint32_t>(line_vertices.size() / stride);
+        mesh.index_count = static_cast<uint32_t>(line_indices.size());
+        mesh.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+
+        create_buffer_with_data(eng, line_vertices.data(), line_vertices.size() * sizeof(float),
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
+        create_buffer_with_data(eng, line_indices.data(), line_indices.size() * sizeof(uint32_t),
+            VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
+
+        return mesh;
+    }
+
     // ============================================================================
     // GeometryPlugin Pipeline and Rendering Implementation
     // ============================================================================
@@ -1265,21 +1356,23 @@ namespace vk::plugins {
         vk_check(vkCreatePipelineLayout(eng.device, &layout_info, nullptr, &pipeline_layout_),
                 "Failed to create geometry pipeline layout");
 
-        // Shader stages
-        const VkPipelineShaderStageCreateInfo shader_stages[] = {
-            {
-                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                .stage = VK_SHADER_STAGE_VERTEX_BIT,
-                .module = vert_module,
-                .pName = "main"
-            },
-            {
-                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-                .module = frag_module,
-                .pName = "main"
-            }
+        const VkPipelineShaderStageCreateInfo vert_stage{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT,
+            .module = vert_module,
+            .pName = "main"
         };
+
+        const VkPipelineShaderStageCreateInfo frag_stage{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .module = frag_module,
+            .pName = "main"
+        };
+
+        const VkPipelineShaderStageCreateInfo filled_stages[] = {vert_stage, frag_stage};
+        const VkPipelineShaderStageCreateInfo wire_stages[] = {vert_stage, frag_stage};
+        const VkPipelineShaderStageCreateInfo line_stages[] = {vert_stage, frag_stage};
 
         // Vertex input bindings (per-vertex and per-instance)
         const VkVertexInputBindingDescription bindings[] = {
@@ -1318,7 +1411,7 @@ namespace vk::plugins {
         const VkPipelineRasterizationStateCreateInfo rasterizer{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
             .polygonMode = VK_POLYGON_MODE_FILL,
-            .cullMode = VK_CULL_MODE_NONE,  // Disable culling to see both front and back faces
+            .cullMode = VK_CULL_MODE_BACK_BIT,  // Disable culling to see both front and back faces
             .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
             .lineWidth = 1.0f
         };
@@ -1372,7 +1465,7 @@ namespace vk::plugins {
             .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
             .pNext = &rendering_info,
             .stageCount = 2,
-            .pStages = shader_stages,
+            .pStages = filled_stages,
             .pVertexInputState = &vertex_input,
             .pInputAssemblyState = &input_assembly,
             .pViewportState = &viewport_state,
@@ -1394,6 +1487,7 @@ namespace vk::plugins {
 
         auto wireframe_pipeline_info = pipeline_info;
         wireframe_pipeline_info.pRasterizationState = &wireframe_rasterizer;
+        wireframe_pipeline_info.pStages = wire_stages;
 
         vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &wireframe_pipeline_info, nullptr, &wireframe_pipeline_),
                 "Failed to create wireframe geometry pipeline");
@@ -1412,6 +1506,7 @@ namespace vk::plugins {
         auto line_pipeline_info = pipeline_info;
         line_pipeline_info.pInputAssemblyState = &line_input_assembly;
         line_pipeline_info.pRasterizationState = &line_rasterizer;
+        line_pipeline_info.pStages = line_stages;
 
         vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &line_pipeline_info, nullptr, &line_pipeline_),
                 "Failed to create line geometry pipeline");
@@ -1442,14 +1537,46 @@ namespace vk::plugins {
     }
 
     void GeometryPlugin::create_geometry_meshes(const context::EngineContext& eng) {
-        geometry_meshes_[GeometryType::Sphere] = create_sphere_mesh(eng);
-        geometry_meshes_[GeometryType::Box] = create_box_mesh(eng);
-        geometry_meshes_[GeometryType::Cylinder] = create_cylinder_mesh(eng);
-        geometry_meshes_[GeometryType::Cone] = create_cone_mesh(eng);
-        geometry_meshes_[GeometryType::Torus] = create_torus_mesh(eng);
-        geometry_meshes_[GeometryType::Capsule] = create_capsule_mesh(eng);
-        geometry_meshes_[GeometryType::Plane] = create_plane_mesh(eng);
-        geometry_meshes_[GeometryType::Circle] = create_circle_mesh(eng);
+        {
+            std::vector<float> v; std::vector<uint32_t> i;
+            geometry_meshes_[GeometryType::Sphere] = create_sphere_mesh(eng, 32, &v, &i);
+            normal_meshes_[GeometryType::Sphere] = create_face_normal_mesh(eng, v, i);
+        }
+        {
+            std::vector<float> v; std::vector<uint32_t> i;
+            geometry_meshes_[GeometryType::Box] = create_box_mesh(eng, &v, &i);
+            normal_meshes_[GeometryType::Box] = create_face_normal_mesh(eng, v, i);
+        }
+        {
+            std::vector<float> v; std::vector<uint32_t> i;
+            geometry_meshes_[GeometryType::Cylinder] = create_cylinder_mesh(eng, 32, &v, &i);
+            normal_meshes_[GeometryType::Cylinder] = create_face_normal_mesh(eng, v, i);
+        }
+        {
+            std::vector<float> v; std::vector<uint32_t> i;
+            geometry_meshes_[GeometryType::Cone] = create_cone_mesh(eng, 32, &v, &i);
+            normal_meshes_[GeometryType::Cone] = create_face_normal_mesh(eng, v, i);
+        }
+        {
+            std::vector<float> v; std::vector<uint32_t> i;
+            geometry_meshes_[GeometryType::Torus] = create_torus_mesh(eng, 32, 16, &v, &i);
+            normal_meshes_[GeometryType::Torus] = create_face_normal_mesh(eng, v, i);
+        }
+        {
+            std::vector<float> v; std::vector<uint32_t> i;
+            geometry_meshes_[GeometryType::Capsule] = create_capsule_mesh(eng, 16, &v, &i);
+            normal_meshes_[GeometryType::Capsule] = create_face_normal_mesh(eng, v, i);
+        }
+        {
+            std::vector<float> v; std::vector<uint32_t> i;
+            geometry_meshes_[GeometryType::Plane] = create_plane_mesh(eng, &v, &i);
+            normal_meshes_[GeometryType::Plane] = create_face_normal_mesh(eng, v, i);
+        }
+        {
+            std::vector<float> v; std::vector<uint32_t> i;
+            geometry_meshes_[GeometryType::Circle] = create_circle_mesh(eng, 32, &v, &i);
+            normal_meshes_[GeometryType::Circle] = create_face_normal_mesh(eng, v, i);
+        }
         geometry_meshes_[GeometryType::Line] = create_line_mesh(eng);
         geometry_meshes_[GeometryType::Grid] = create_line_mesh(eng);
         geometry_meshes_[GeometryType::Ray] = create_line_mesh(eng);
@@ -1458,16 +1585,15 @@ namespace vk::plugins {
     void GeometryPlugin::destroy_geometry_meshes(const context::EngineContext& eng) {
         std::println("[CLEANUP]     Freeing {} geometry mesh types", geometry_meshes_.size());
         for (auto& [type, mesh] : geometry_meshes_) {
-            if (mesh.vertex_buffer != VK_NULL_HANDLE) {
-                std::println("[CLEANUP]       Destroying vertex buffer for geometry type {}", static_cast<int>(type));
-                vmaDestroyBuffer(eng.allocator, mesh.vertex_buffer, mesh.vertex_allocation);
-            }
-            if (mesh.index_buffer != VK_NULL_HANDLE) {
-                std::println("[CLEANUP]       Destroying index buffer for geometry type {}", static_cast<int>(type));
-                vmaDestroyBuffer(eng.allocator, mesh.index_buffer, mesh.index_allocation);
-            }
+            destroy_mesh(eng, mesh);
         }
         geometry_meshes_.clear();
+
+        std::println("[CLEANUP]     Freeing {} normal debug mesh types", normal_meshes_.size());
+        for (auto& [type, mesh] : normal_meshes_) {
+            destroy_mesh(eng, mesh);
+        }
+        normal_meshes_.clear();
 
         std::println("[CLEANUP]     Freeing {} instance buffers", instance_buffers_.size());
         for (size_t i = 0; i < instance_buffers_.size(); ++i) {
@@ -1580,13 +1706,40 @@ namespace vk::plugins {
                 vkCmdDraw(cmd, mesh.vertex_count, static_cast<uint32_t>(batch.instances.size()), 0, 0);
             }
         }
+
+        // Optional face-normal visualization overlay
+        if (show_face_normals_ &&
+            batch.type != GeometryType::Line &&
+            batch.type != GeometryType::Ray &&
+            batch.type != GeometryType::Grid) {
+            const auto n_it = normal_meshes_.find(batch.type);
+            if (n_it != normal_meshes_.end()) {
+                const auto& nmesh = n_it->second;
+                if (nmesh.vertex_buffer != VK_NULL_HANDLE) {
+                    const VkBuffer normal_vertex_buffers[] = {nmesh.vertex_buffer, instance_buffer.buffer};
+                    const VkDeviceSize normal_offsets[] = {0, 0};
+                    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, line_pipeline_);
+                    vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float) * 16, view_proj.m.data());
+                    vkCmdBindVertexBuffers(cmd, 0, 2, normal_vertex_buffers, normal_offsets);
+
+                    if (nmesh.index_buffer != VK_NULL_HANDLE) {
+                        vkCmdBindIndexBuffer(cmd, nmesh.index_buffer, 0, VK_INDEX_TYPE_UINT32);
+                        vkCmdDrawIndexed(cmd, nmesh.index_count, static_cast<uint32_t>(batch.instances.size()), 0, 0, 0);
+                    } else {
+                        vkCmdDraw(cmd, nmesh.vertex_count, static_cast<uint32_t>(batch.instances.size()), 0, 0);
+                    }
+                }
+            }
+        }
     }
 
     // ============================================================================
     // Geometry Mesh Generation
     // ============================================================================
 
-    GeometryPlugin::GeometryMesh GeometryPlugin::create_sphere_mesh(const context::EngineContext& eng, const uint32_t segments) {
+    GeometryPlugin::GeometryMesh GeometryPlugin::create_sphere_mesh(const context::EngineContext& eng, const uint32_t segments,
+                                                                    std::vector<float>* out_vertices,
+                                                                    std::vector<uint32_t>* out_indices) {
         std::vector<float> vertices;
         std::vector<uint32_t> indices;
 
@@ -1630,6 +1783,9 @@ namespace vk::plugins {
         mesh.index_count = static_cast<uint32_t>(indices.size());
         mesh.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
+        if (out_vertices) *out_vertices = vertices;
+        if (out_indices) *out_indices = indices;
+
         create_buffer_with_data(eng, vertices.data(), vertices.size() * sizeof(float),
             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
         create_buffer_with_data(eng, indices.data(), indices.size() * sizeof(uint32_t),
@@ -1638,7 +1794,9 @@ namespace vk::plugins {
         return mesh;
     }
 
-    GeometryPlugin::GeometryMesh GeometryPlugin::create_box_mesh(const context::EngineContext& eng) {
+    GeometryPlugin::GeometryMesh GeometryPlugin::create_box_mesh(const context::EngineContext& eng,
+                                                                 std::vector<float>* out_vertices,
+                                                                 std::vector<uint32_t>* out_indices) {
         constexpr float vertices[] = {
             // positions          // normals
             // Front
@@ -1687,6 +1845,13 @@ namespace vk::plugins {
         mesh.index_count = 36;
         mesh.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
+        if (out_vertices) {
+            out_vertices->assign(std::begin(vertices), std::end(vertices));
+        }
+        if (out_indices) {
+            out_indices->assign(std::begin(indices), std::end(indices));
+        }
+
         create_buffer_with_data(eng, vertices, sizeof(vertices),
             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
         create_buffer_with_data(eng, indices, sizeof(indices),
@@ -1695,7 +1860,9 @@ namespace vk::plugins {
         return mesh;
     }
 
-    GeometryPlugin::GeometryMesh GeometryPlugin::create_cylinder_mesh(const context::EngineContext& eng, const uint32_t segments) {
+    GeometryPlugin::GeometryMesh GeometryPlugin::create_cylinder_mesh(const context::EngineContext& eng, const uint32_t segments,
+                                                                      std::vector<float>* out_vertices,
+                                                                      std::vector<uint32_t>* out_indices) {
         std::vector<float> vertices;
         std::vector<uint32_t> indices;
 
@@ -1721,12 +1888,12 @@ namespace vk::plugins {
             const auto base = i * 2;
             // Reversed winding for correct CCW from outside
             indices.push_back(base);      // bottom current
-            indices.push_back(base + 2);  // bottom next
             indices.push_back(base + 1);  // top current
+            indices.push_back(base + 2);  // bottom next
 
             indices.push_back(base + 2);  // bottom next
-            indices.push_back(base + 3);  // top next
             indices.push_back(base + 1);  // top current
+            indices.push_back(base + 3);  // top next
         }
 
         // Add bottom cap center vertex
@@ -1776,6 +1943,9 @@ namespace vk::plugins {
         mesh.index_count = static_cast<uint32_t>(indices.size());
         mesh.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
+        if (out_vertices) *out_vertices = vertices;
+        if (out_indices) *out_indices = indices;
+
         create_buffer_with_data(eng, vertices.data(), vertices.size() * sizeof(float),
             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
         create_buffer_with_data(eng, indices.data(), indices.size() * sizeof(uint32_t),
@@ -1784,7 +1954,9 @@ namespace vk::plugins {
         return mesh;
     }
 
-    GeometryPlugin::GeometryMesh GeometryPlugin::create_cone_mesh(const context::EngineContext& eng, const uint32_t segments) {
+    GeometryPlugin::GeometryMesh GeometryPlugin::create_cone_mesh(const context::EngineContext& eng, const uint32_t segments,
+                                                                  std::vector<float>* out_vertices,
+                                                                  std::vector<uint32_t>* out_indices) {
         std::vector<float> vertices;
         std::vector<uint32_t> indices;
 
@@ -1838,6 +2010,9 @@ namespace vk::plugins {
         mesh.index_count = static_cast<uint32_t>(indices.size());
         mesh.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
+        if (out_vertices) *out_vertices = vertices;
+        if (out_indices) *out_indices = indices;
+
         create_buffer_with_data(eng, vertices.data(), vertices.size() * sizeof(float),
             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
         create_buffer_with_data(eng, indices.data(), indices.size() * sizeof(uint32_t),
@@ -1847,7 +2022,9 @@ namespace vk::plugins {
     }
 
     GeometryPlugin::GeometryMesh GeometryPlugin::create_torus_mesh(const context::EngineContext& eng,
-                                                                   const uint32_t segments, const uint32_t tube_segments) {
+                                                                   const uint32_t segments, const uint32_t tube_segments,
+                                                                   std::vector<float>* out_vertices,
+                                                                   std::vector<uint32_t>* out_indices) {
         std::vector<float> vertices;
         std::vector<uint32_t> indices;
 
@@ -1893,6 +2070,9 @@ namespace vk::plugins {
         mesh.index_count = static_cast<uint32_t>(indices.size());
         mesh.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
+        if (out_vertices) *out_vertices = vertices;
+        if (out_indices) *out_indices = indices;
+
         create_buffer_with_data(eng, vertices.data(), vertices.size() * sizeof(float),
             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
         create_buffer_with_data(eng, indices.data(), indices.size() * sizeof(uint32_t),
@@ -1901,7 +2081,9 @@ namespace vk::plugins {
         return mesh;
     }
 
-    GeometryPlugin::GeometryMesh GeometryPlugin::create_capsule_mesh(const context::EngineContext& eng, const uint32_t segments) {
+    GeometryPlugin::GeometryMesh GeometryPlugin::create_capsule_mesh(const context::EngineContext& eng, const uint32_t segments,
+                                                                    std::vector<float>* out_vertices,
+                                                                    std::vector<uint32_t>* out_indices) {
         std::vector<float> vertices;
         std::vector<uint32_t> indices;
 
@@ -1937,12 +2119,12 @@ namespace vk::plugins {
 
                 // Reversed winding
                 indices.push_back(current);
-                indices.push_back(current + 1);
                 indices.push_back(next);
+                indices.push_back(current + 1);
 
                 indices.push_back(current + 1);
-                indices.push_back(next + 1);
                 indices.push_back(next);
+                indices.push_back(next + 1);
             }
         }
 
@@ -2019,6 +2201,9 @@ namespace vk::plugins {
         mesh.index_count = static_cast<uint32_t>(indices.size());
         mesh.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
+        if (out_vertices) *out_vertices = vertices;
+        if (out_indices) *out_indices = indices;
+
         create_buffer_with_data(eng, vertices.data(), vertices.size() * sizeof(float),
             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
         create_buffer_with_data(eng, indices.data(), indices.size() * sizeof(uint32_t),
@@ -2027,7 +2212,9 @@ namespace vk::plugins {
         return mesh;
     }
 
-    GeometryPlugin::GeometryMesh GeometryPlugin::create_plane_mesh(const context::EngineContext& eng) {
+    GeometryPlugin::GeometryMesh GeometryPlugin::create_plane_mesh(const context::EngineContext& eng,
+                                                                   std::vector<float>* out_vertices,
+                                                                   std::vector<uint32_t>* out_indices) {
         constexpr float vertices[] = {
             // positions          // normals
             -0.5f, 0.0f, -0.5f,   0.0f, 1.0f, 0.0f,
@@ -2037,13 +2224,20 @@ namespace vk::plugins {
         };
 
         constexpr uint32_t indices[] = {
-            0, 1, 2, 2, 3, 0
+            0, 2, 1, 2, 0, 3
         };
 
         GeometryMesh mesh;
         mesh.vertex_count = 4;
         mesh.index_count = 6;
         mesh.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+        if (out_vertices) {
+            out_vertices->assign(std::begin(vertices), std::end(vertices));
+        }
+        if (out_indices) {
+            out_indices->assign(std::begin(indices), std::end(indices));
+        }
 
         create_buffer_with_data(eng, vertices, sizeof(vertices),
             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
@@ -2053,7 +2247,9 @@ namespace vk::plugins {
         return mesh;
     }
 
-    GeometryPlugin::GeometryMesh GeometryPlugin::create_circle_mesh(const context::EngineContext& eng, const uint32_t segments) {
+    GeometryPlugin::GeometryMesh GeometryPlugin::create_circle_mesh(const context::EngineContext& eng, const uint32_t segments,
+                                                                    std::vector<float>* out_vertices,
+                                                                    std::vector<uint32_t>* out_indices) {
         std::vector<float> vertices;
         std::vector<uint32_t> indices;
 
@@ -2074,14 +2270,17 @@ namespace vk::plugins {
         // Generate indices
         for (uint32_t i = 1; i <= segments; ++i) {
             indices.push_back(0);
-            indices.push_back(i);
             indices.push_back(i + 1);
+            indices.push_back(i);
         }
 
         GeometryMesh mesh;
         mesh.vertex_count = static_cast<uint32_t>(vertices.size() / 6);
         mesh.index_count = static_cast<uint32_t>(indices.size());
         mesh.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+        if (out_vertices) *out_vertices = vertices;
+        if (out_indices) *out_indices = indices;
 
         create_buffer_with_data(eng, vertices.data(), vertices.size() * sizeof(float),
             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);

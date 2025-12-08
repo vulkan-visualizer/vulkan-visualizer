@@ -16,6 +16,11 @@ void main() {
     float lighting = ambient + diffuse;
 
     vec3 finalColor = vColor * lighting;
+
+    // Highlight back faces to spot incorrect winding even in filled shading
+    if (!gl_FrontFacing) {
+        finalColor = vec3(1.0, 0.1, 0.1); // vivid red warning
+    }
+
     outColor = vec4(finalColor, 1.0);
 }
-

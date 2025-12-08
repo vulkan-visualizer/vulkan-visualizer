@@ -238,6 +238,8 @@ namespace vk::plugins {
         void add_ray_batch(const std::vector<RayInfo>& rays, const camera::Vec3* aabb_min = nullptr, const camera::Vec3* aabb_max = nullptr);
 
         void set_viewport_plugin(Viewport3DPlugin* vp) noexcept { viewport_plugin_ = vp; }
+        void set_show_face_normals(bool enabled) noexcept { show_face_normals_ = enabled; }
+        void set_normal_length(float length) noexcept { normal_length_ = length; }
 
     private:
         struct GeometryMesh {
@@ -263,15 +265,17 @@ namespace vk::plugins {
         void update_instance_buffers(const context::EngineContext& eng);
         void render_batch(VkCommandBuffer cmd, const GeometryBatch& batch, const InstanceBuffer& instance_buffer, const camera::Mat4& view_proj);
 
-        GeometryMesh create_sphere_mesh(const context::EngineContext& eng, uint32_t segments = 32);
-        GeometryMesh create_box_mesh(const context::EngineContext& eng);
-        GeometryMesh create_cylinder_mesh(const context::EngineContext& eng, uint32_t segments = 32);
-        GeometryMesh create_cone_mesh(const context::EngineContext& eng, uint32_t segments = 32);
-        GeometryMesh create_torus_mesh(const context::EngineContext& eng, uint32_t segments = 32, uint32_t tube_segments = 16);
-        GeometryMesh create_capsule_mesh(const context::EngineContext& eng, uint32_t segments = 16);
-        GeometryMesh create_plane_mesh(const context::EngineContext& eng);
-        GeometryMesh create_circle_mesh(const context::EngineContext& eng, uint32_t segments = 32);
+        GeometryMesh create_sphere_mesh(const context::EngineContext& eng, uint32_t segments = 32, std::vector<float>* out_vertices = nullptr, std::vector<uint32_t>* out_indices = nullptr);
+        GeometryMesh create_box_mesh(const context::EngineContext& eng, std::vector<float>* out_vertices = nullptr, std::vector<uint32_t>* out_indices = nullptr);
+        GeometryMesh create_cylinder_mesh(const context::EngineContext& eng, uint32_t segments = 32, std::vector<float>* out_vertices = nullptr, std::vector<uint32_t>* out_indices = nullptr);
+        GeometryMesh create_cone_mesh(const context::EngineContext& eng, uint32_t segments = 32, std::vector<float>* out_vertices = nullptr, std::vector<uint32_t>* out_indices = nullptr);
+        GeometryMesh create_torus_mesh(const context::EngineContext& eng, uint32_t segments = 32, uint32_t tube_segments = 16, std::vector<float>* out_vertices = nullptr, std::vector<uint32_t>* out_indices = nullptr);
+        GeometryMesh create_capsule_mesh(const context::EngineContext& eng, uint32_t segments = 16, std::vector<float>* out_vertices = nullptr, std::vector<uint32_t>* out_indices = nullptr);
+        GeometryMesh create_plane_mesh(const context::EngineContext& eng, std::vector<float>* out_vertices = nullptr, std::vector<uint32_t>* out_indices = nullptr);
+        GeometryMesh create_circle_mesh(const context::EngineContext& eng, uint32_t segments = 32, std::vector<float>* out_vertices = nullptr, std::vector<uint32_t>* out_indices = nullptr);
         GeometryMesh create_line_mesh(const context::EngineContext& eng);
+        GeometryMesh create_face_normal_mesh(const context::EngineContext& eng, const std::vector<float>& vertices, const std::vector<uint32_t>& indices) const;
+        void destroy_mesh(const context::EngineContext& eng, GeometryMesh& mesh) const;
 
         bool enabled_{true};
         Viewport3DPlugin* viewport_plugin_{nullptr};
@@ -283,10 +287,13 @@ namespace vk::plugins {
         VkPipeline line_pipeline_{VK_NULL_HANDLE};
 
         std::unordered_map<GeometryType, GeometryMesh> geometry_meshes_;
+        std::unordered_map<GeometryType, GeometryMesh> normal_meshes_;
         std::vector<InstanceBuffer> instance_buffers_;
 
         VkFormat color_format_{VK_FORMAT_UNDEFINED};
         VkFormat depth_format_{VK_FORMAT_UNDEFINED};
         VkImageLayout depth_layout_{VK_IMAGE_LAYOUT_UNDEFINED};
+        bool show_face_normals_{false};
+        float normal_length_{0.1f};
     };
 } // namespace vk::plugins
