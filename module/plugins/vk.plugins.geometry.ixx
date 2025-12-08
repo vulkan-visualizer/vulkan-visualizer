@@ -9,6 +9,7 @@ module;
 export module vk.plugins.geometry;
 import vk.context;
 import vk.toolkit.math;
+import vk.toolkit.camera;
 
 namespace vk::plugins {
     export enum class GeometryType : uint8_t {
@@ -84,7 +85,7 @@ namespace vk::plugins {
         static void on_event(const SDL_Event&) {}
         void on_resize(uint32_t width, uint32_t height);
 
-        explicit Geometry(const std::shared_ptr<context::Camera>& camera) : camera_(camera) {}
+        explicit Geometry(const std::shared_ptr<toolkit::camera::Camera>& camera) : camera_(camera) {}
         ~Geometry()                              = default;
         Geometry(const Geometry&)                = delete;
         Geometry& operator=(const Geometry&)     = delete;
@@ -107,7 +108,7 @@ namespace vk::plugins {
         void render_batch(VkCommandBuffer& cmd, const GeometryBatch& batch, const InstanceBuffer& instance_buffer, const toolkit::math::Mat4& view_proj);
 
     private:
-        std::shared_ptr<context::Camera> camera_{nullptr};
+        std::shared_ptr<toolkit::camera::Camera> camera_{nullptr};
         std::vector<GeometryBatch> batches_{};
 
         std::unordered_map<GeometryType, GeometryMesh> geometry_meshes_{};

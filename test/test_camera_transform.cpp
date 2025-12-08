@@ -16,6 +16,8 @@
 import vk.context;
 import vk.engine;
 import vk.toolkit.math;
+import vk.toolkit.log;
+import vk.toolkit.camera;
 
 namespace {
     struct Vertex {
@@ -193,7 +195,7 @@ namespace {
 
         const VkBufferCreateInfo buffer_ci{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size, .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
 
-        vk::context::vk_check(vkCreateBuffer(eng.device, &buffer_ci, nullptr, &mb.buffer), "Failed to create vertex buffer");
+        vk::toolkit::log::vk_check(vkCreateBuffer(eng.device, &buffer_ci, nullptr, &mb.buffer), "Failed to create vertex buffer");
 
         VkMemoryRequirements mem_req{};
         vkGetBufferMemoryRequirements(eng.device, mb.buffer, &mem_req);
@@ -211,11 +213,11 @@ namespace {
 
         const VkMemoryAllocateInfo alloc_info{.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mem_req.size, .memoryTypeIndex = find_memory_type(mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
 
-        vk::context::vk_check(vkAllocateMemory(eng.device, &alloc_info, nullptr, &mb.memory), "Failed to allocate vertex buffer memory");
-        vk::context::vk_check(vkBindBufferMemory(eng.device, mb.buffer, mb.memory, 0), "Failed to bind vertex buffer memory");
+        vk::toolkit::log::vk_check(vkAllocateMemory(eng.device, &alloc_info, nullptr, &mb.memory), "Failed to allocate vertex buffer memory");
+        vk::toolkit::log::vk_check(vkBindBufferMemory(eng.device, mb.buffer, mb.memory, 0), "Failed to bind vertex buffer memory");
 
         void* mapped = nullptr;
-        vk::context::vk_check(vkMapMemory(eng.device, mb.memory, 0, size, 0, &mapped), "Failed to map vertex buffer memory");
+        vk::toolkit::log::vk_check(vkMapMemory(eng.device, mb.memory, 0, size, 0, &mapped), "Failed to map vertex buffer memory");
         std::memcpy(mapped, vertices.data(), static_cast<size_t>(size));
         vkUnmapMemory(eng.device, mb.memory);
 
@@ -237,14 +239,14 @@ namespace {
         const VkShaderModuleCreateInfo create_info{.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = code.size(), .pCode = reinterpret_cast<const uint32_t*>(code.data())};
 
         VkShaderModule module = VK_NULL_HANDLE;
-        vk::context::vk_check(vkCreateShaderModule(eng.device, &create_info, nullptr, &module), "Failed to create shader module");
+        vk::toolkit::log::vk_check(vkCreateShaderModule(eng.device, &create_info, nullptr, &module), "Failed to create shader module");
         return module;
     }
 } // namespace
 
 class CameraTransformPlugin {
 public:
-    explicit CameraTransformPlugin(std::shared_ptr<vk::context::Camera> camera) : camera_(std::move(camera)) {}
+    explicit CameraTransformPlugin(std::shared_ptr<vk::toolkit::camera::Camera> camera) : camera_(std::move(camera)) {}
 
     [[nodiscard]] static constexpr vk::context::PluginPhase phases() noexcept {
         using vk::context::PluginPhase;
@@ -407,7 +409,7 @@ private:
 
         const VkPushConstantRange push_constant{.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0, .size = sizeof(float) * 16};
         const VkPipelineLayoutCreateInfo layout_info{.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .pushConstantRangeCount = 1, .pPushConstantRanges = &push_constant};
-        vk::context::vk_check(vkCreatePipelineLayout(eng.device, &layout_info, nullptr, &pipeline_layout_), "Failed to create pipeline layout");
+        vk::toolkit::log::vk_check(vkCreatePipelineLayout(eng.device, &layout_info, nullptr, &pipeline_layout_), "Failed to create pipeline layout");
 
         const VkPipelineShaderStageCreateInfo vert_stage{.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = vert_module, .pName = "main"};
         const VkPipelineShaderStageCreateInfo frag_stage{.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = frag_module, .pName = "main"};
@@ -453,7 +455,7 @@ private:
             .renderPass                                         = VK_NULL_HANDLE,
             .subpass                                            = 0};
 
-        vk::context::vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline_), "Failed to create frustum pipeline");
+        vk::toolkit::log::vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline_), "Failed to create frustum pipeline");
 
         vkDestroyShaderModule(eng.device, vert_module, nullptr);
         vkDestroyShaderModule(eng.device, frag_module, nullptr);
@@ -476,7 +478,7 @@ private:
         pipeline_layout_ = VK_NULL_HANDLE;
     }
 
-    std::shared_ptr<vk::context::Camera> camera_{};
+    std::shared_ptr<vk::toolkit::camera::Camera> camera_{};
     std::vector<vk::toolkit::math::Mat4> poses_{};
     std::vector<ColoredLine> frustum_lines_{};
     std::vector<ColoredLine> axis_lines_{};
@@ -495,7 +497,7 @@ private:
 
 int main() {
     vk::engine::VulkanEngine engine;
-    const auto camera = std::make_shared<vk::context::Camera>();
+    const auto camera = std::make_shared<vk::toolkit::camera::Camera>();
     CameraTransformPlugin transform_visualizer(camera);
 
     engine.init(transform_visualizer);

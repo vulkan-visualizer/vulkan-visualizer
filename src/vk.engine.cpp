@@ -10,6 +10,7 @@ module;
 #include <ranges>
 #include <stb_image_write.h>
 module vk.engine;
+import vk.toolkit.log;
 
 // clang-format off
 #ifndef IF_NOT_NULL_DO
@@ -111,7 +112,7 @@ void vk::engine::VulkanEngine::create_context() {
     ctx_.transfer_queue_family = vkbDev.get_queue_index(vkb::QueueType::transfer).value();
     ctx_.present_queue_family  = ctx_.graphics_queue_family;
     VmaAllocatorCreateInfo ac{.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT, .physicalDevice = ctx_.physical, .device = ctx_.device, .instance = ctx_.instance, .vulkanApiVersion = VK_API_VERSION_1_3};
-    context::vk_check(vmaCreateAllocator(&ac, &ctx_.allocator));
+    toolkit::log::vk_check(vmaCreateAllocator(&ac, &ctx_.allocator));
     mdq_.emplace_back([&] { vmaDestroyAllocator(ctx_.allocator); });
 
     std::vector<context::DescriptorAllocator::PoolSizeRatio> sizes = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2.0f}, {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4.0f}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4.0f}, {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4.0f}};
@@ -120,7 +121,7 @@ void vk::engine::VulkanEngine::create_context() {
 
     VkSemaphoreTypeCreateInfo type_ci{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO, .pNext = nullptr, .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = 0};
     VkSemaphoreCreateInfo sem_ci{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &type_ci, .flags = 0u};
-    context::vk_check(vkCreateSemaphore(ctx_.device, &sem_ci, nullptr, &render_timeline_));
+    toolkit::log::vk_check(vkCreateSemaphore(ctx_.device, &sem_ci, nullptr, &render_timeline_));
     mdq_.emplace_back([&] { vkDestroySemaphore(ctx_.device, render_timeline_, nullptr); });
     timeline_value_ = 0;
 }
@@ -192,7 +193,7 @@ void vk::engine::VulkanEngine::create_renderer_targets() {
             .pQueueFamilyIndices       = nullptr,
             .initialLayout             = req.initial_layout};
         constexpr VmaAllocationCreateInfo ainfo{.flags = 0u, .usage = VMA_MEMORY_USAGE_GPU_ONLY, .requiredFlags = static_cast<VkMemoryPropertyFlags>(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT), .preferredFlags = 0u, .memoryTypeBits = 0u, .pool = VK_NULL_HANDLE, .pUserData = nullptr, .priority = 1.0f};
-        context::vk_check(vmaCreateImage(ctx_.allocator, &imgci, &ainfo, &out.image.image, &out.image.allocation, nullptr));
+        toolkit::log::vk_check(vmaCreateImage(ctx_.allocator, &imgci, &ainfo, &out.image.image, &out.image.allocation, nullptr));
         const VkImageViewCreateInfo viewci{.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
             .pNext                                = nullptr,
             .flags                                = 0u,
@@ -201,7 +202,7 @@ void vk::engine::VulkanEngine::create_renderer_targets() {
             .format                               = req.format,
             .components                           = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
             .subresourceRange                     = {req.aspect, 0u, 1u, 0u, 1u}};
-        context::vk_check(vkCreateImageView(ctx_.device, &viewci, nullptr, &out.image.imageView));
+        toolkit::log::vk_check(vkCreateImageView(ctx_.device, &viewci, nullptr, &out.image.imageView));
         out.image.imageFormat = req.format;
         out.image.imageExtent = {this->state_.width, this->state_.height, 1u};
         out.usage             = req.usage;
@@ -252,19 +253,19 @@ void vk::engine::VulkanEngine::destroy_renderer_targets() {
 void vk::engine::VulkanEngine::create_command_buffers() {
     const VkCommandPoolCreateInfo pci{.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .pNext = nullptr, .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, .queueFamilyIndex = ctx_.graphics_queue_family};
     for (auto& fr : frames_) {
-        context::vk_check(vkCreateCommandPool(ctx_.device, &pci, nullptr, &fr.commandPool));
+        toolkit::log::vk_check(vkCreateCommandPool(ctx_.device, &pci, nullptr, &fr.commandPool));
         VkCommandBufferAllocateInfo ai{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .pNext = nullptr, .commandPool = fr.commandPool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1u};
-        context::vk_check(vkAllocateCommandBuffers(ctx_.device, &ai, &fr.mainCommandBuffer));
+        toolkit::log::vk_check(vkAllocateCommandBuffers(ctx_.device, &ai, &fr.mainCommandBuffer));
         VkSemaphoreCreateInfo sci{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = nullptr, .flags = 0u};
-        context::vk_check(vkCreateSemaphore(ctx_.device, &sci, nullptr, &fr.imageAcquired));
-        context::vk_check(vkCreateSemaphore(ctx_.device, &sci, nullptr, &fr.renderComplete));
+        toolkit::log::vk_check(vkCreateSemaphore(ctx_.device, &sci, nullptr, &fr.imageAcquired));
+        toolkit::log::vk_check(vkCreateSemaphore(ctx_.device, &sci, nullptr, &fr.renderComplete));
         if (renderer_caps_.allow_async_compute && ctx_.compute_queue && ctx_.compute_queue != ctx_.graphics_queue) {
             VkCommandPoolCreateInfo cpool{.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .pNext = nullptr, .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, .queueFamilyIndex = ctx_.compute_queue_family};
-            context::vk_check(vkCreateCommandPool(ctx_.device, &cpool, nullptr, &fr.computeCommandPool));
+            toolkit::log::vk_check(vkCreateCommandPool(ctx_.device, &cpool, nullptr, &fr.computeCommandPool));
             VkCommandBufferAllocateInfo cai{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .pNext = nullptr, .commandPool = fr.computeCommandPool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1u};
-            context::vk_check(vkAllocateCommandBuffers(ctx_.device, &cai, &fr.asyncComputeCommandBuffer));
+            toolkit::log::vk_check(vkAllocateCommandBuffers(ctx_.device, &cai, &fr.asyncComputeCommandBuffer));
             VkSemaphoreCreateInfo sci2{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = nullptr, .flags = 0u};
-            context::vk_check(vkCreateSemaphore(ctx_.device, &sci2, nullptr, &fr.asyncComputeFinished));
+            toolkit::log::vk_check(vkCreateSemaphore(ctx_.device, &sci2, nullptr, &fr.asyncComputeFinished));
         }
     }
     mdq_.emplace_back([&] { destroy_command_buffers(); });
@@ -289,7 +290,7 @@ void vk::engine::VulkanEngine::begin_frame(uint32_t& image_index, VkCommandBuffe
         VkSemaphore sem = render_timeline_;
         uint64_t val    = fr.submitted_timeline_value;
         const VkSemaphoreWaitInfo wi{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .pNext = nullptr, .flags = 0u, .semaphoreCount = 1u, .pSemaphores = &sem, .pValues = &val};
-        context::vk_check(vkWaitSemaphores(ctx_.device, &wi, UINT64_MAX));
+        toolkit::log::vk_check(vkWaitSemaphores(ctx_.device, &wi, UINT64_MAX));
     }
     const VkResult acq = vkAcquireNextImageKHR(ctx_.device, swapchain_.swapchain, UINT64_MAX, fr.imageAcquired, VK_NULL_HANDLE, &image_index);
     if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
@@ -297,14 +298,14 @@ void vk::engine::VulkanEngine::begin_frame(uint32_t& image_index, VkCommandBuffe
         cmd                     = VK_NULL_HANDLE;
         return;
     }
-    context::vk_check(acq);
-    context::vk_check(vkResetCommandBuffer(fr.mainCommandBuffer, 0));
+    toolkit::log::vk_check(acq);
+    toolkit::log::vk_check(vkResetCommandBuffer(fr.mainCommandBuffer, 0));
     cmd = fr.mainCommandBuffer;
     constexpr VkCommandBufferBeginInfo bi{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .pNext = nullptr, .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, .pInheritanceInfo = nullptr};
-    context::vk_check(vkBeginCommandBuffer(cmd, &bi));
+    toolkit::log::vk_check(vkBeginCommandBuffer(cmd, &bi));
 }
 void vk::engine::VulkanEngine::end_frame(uint32_t image_index, const VkCommandBuffer& cmd) {
-    context::vk_check(vkEndCommandBuffer(cmd));
+    toolkit::log::vk_check(vkEndCommandBuffer(cmd));
     context::FrameData& fr = frames_[state_.frame_number % context::FRAME_OVERLAP];
     VkCommandBufferSubmitInfo cbsi{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .pNext = nullptr, .commandBuffer = cmd, .deviceMask = 0u};
     VkSemaphoreSubmitInfo waitInfos[2]{};
@@ -320,7 +321,7 @@ void vk::engine::VulkanEngine::end_frame(uint32_t image_index, const VkCommandBu
     VkSemaphoreSubmitInfo signalInfos[2]{VkSemaphoreSubmitInfo{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .pNext = nullptr, .semaphore = fr.renderComplete, .value = 0u, .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, .deviceIndex = 0u},
         VkSemaphoreSubmitInfo{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .pNext = nullptr, .semaphore = render_timeline_, .value = timeline_to_signal, .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, .deviceIndex = 0u}};
     const VkSubmitInfo2 si{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2, .pNext = nullptr, .waitSemaphoreInfoCount = waitCount, .pWaitSemaphoreInfos = waitInfos, .commandBufferInfoCount = 1, .pCommandBufferInfos = &cbsi, .signalSemaphoreInfoCount = 2u, .pSignalSemaphoreInfos = signalInfos};
-    context::vk_check(vkQueueSubmit2(ctx_.graphics_queue, 1, &si, VK_NULL_HANDLE));
+    toolkit::log::vk_check(vkQueueSubmit2(ctx_.graphics_queue, 1, &si, VK_NULL_HANDLE));
     fr.submitted_timeline_value = timeline_to_signal;
     const VkPresentInfoKHR pi{.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, .pNext = nullptr, .waitSemaphoreCount = 1u, .pWaitSemaphores = &fr.renderComplete, .swapchainCount = 1u, .pSwapchains = &swapchain_.swapchain, .pImageIndices = &image_index, .pResults = nullptr};
     const VkResult pres = vkQueuePresentKHR(ctx_.graphics_queue, &pi);
@@ -328,7 +329,7 @@ void vk::engine::VulkanEngine::end_frame(uint32_t image_index, const VkCommandBu
         state_.resize_requested = true;
         return;
     }
-    context::vk_check(pres);
+    toolkit::log::vk_check(pres);
 }
 void vk::engine::VulkanEngine::create_imgui() {
     constexpr std::array pool_sizes{VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLER, 1000}, VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000}, VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000}, VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000}, VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000},
@@ -342,7 +343,7 @@ void vk::engine::VulkanEngine::create_imgui() {
         .poolSizeCount = static_cast<uint32_t>(pool_sizes.size()),
         .pPoolSizes    = pool_sizes.data(),
     };
-    context::vk_check(vkCreateDescriptorPool(ctx_.device, &pool_info, nullptr, &ctx_.descriptor_allocator.pool), "Failed to create descriptor pool");
+    toolkit::log::vk_check(vkCreateDescriptorPool(ctx_.device, &pool_info, nullptr, &ctx_.descriptor_allocator.pool), "Failed to create descriptor pool");
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -372,7 +373,7 @@ void vk::engine::VulkanEngine::create_imgui() {
     init_info.ImageCount          = context::FRAME_OVERLAP;
     init_info.MSAASamples         = VK_SAMPLE_COUNT_1_BIT;
     init_info.UseDynamicRendering = VK_TRUE;
-    init_info.CheckVkResultFn     = [](const VkResult res) { context::vk_check(res, "ImGui Vulkan operation"); };
+    init_info.CheckVkResultFn     = [](const VkResult res) { toolkit::log::vk_check(res, "ImGui Vulkan operation"); };
 
     VkPipelineRenderingCreateInfo rendering_info{.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO, .colorAttachmentCount = 1, .pColorAttachmentFormats = &swapchain_.swapchain_image_format};
 

@@ -14,6 +14,7 @@ module;
 #include <vulkan/vulkan.h>
 module vk.plugins.geometry;
 import vk.context;
+import vk.toolkit.log;
 
 namespace {
     void create_buffer_with_data(const vk::context::EngineContext& eng, const void* data, VkDeviceSize size, VkBufferUsageFlags usage, VkBuffer& buffer, VmaAllocation& allocation) {
@@ -22,7 +23,7 @@ namespace {
         constexpr VmaAllocationCreateInfo alloc_ci{.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT, .usage = VMA_MEMORY_USAGE_AUTO, .requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT};
 
         VmaAllocationInfo alloc_info{};
-        vk::context::vk_check(vmaCreateBuffer(eng.allocator, &buffer_ci, &alloc_ci, &buffer, &allocation, &alloc_info), "Failed to create geometry buffer");
+        vk::toolkit::log::vk_check(vmaCreateBuffer(eng.allocator, &buffer_ci, &alloc_ci, &buffer, &allocation, &alloc_info), "Failed to create geometry buffer");
 
         void* mapped = nullptr;
         vmaMapMemory(eng.allocator, allocation, &mapped);
@@ -831,7 +832,7 @@ void vk::plugins::Geometry::create_pipelines(const context::EngineContext& eng, 
         const VkShaderModuleCreateInfo create_info{.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = code.size(), .pCode = reinterpret_cast<const uint32_t*>(code.data())};
 
         VkShaderModule module = VK_NULL_HANDLE;
-        context::vk_check(vkCreateShaderModule(eng.device, &create_info, nullptr, &module), "Failed to create shader module");
+        toolkit::log::vk_check(vkCreateShaderModule(eng.device, &create_info, nullptr, &module), "Failed to create shader module");
         return module;
     };
 
@@ -843,7 +844,7 @@ void vk::plugins::Geometry::create_pipelines(const context::EngineContext& eng, 
 
     const VkPipelineLayoutCreateInfo layout_info{.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .pushConstantRangeCount = 1, .pPushConstantRanges = &push_constant};
 
-    context::vk_check(vkCreatePipelineLayout(eng.device, &layout_info, nullptr, &pipeline_layout_), "Failed to create geometry pipeline layout");
+    toolkit::log::vk_check(vkCreatePipelineLayout(eng.device, &layout_info, nullptr, &pipeline_layout_), "Failed to create geometry pipeline layout");
 
     const VkPipelineShaderStageCreateInfo vert_stage{.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = vert_module, .pName = "main"};
 
@@ -915,7 +916,7 @@ void vk::plugins::Geometry::create_pipelines(const context::EngineContext& eng, 
         .pDynamicState                                      = &dynamic_state,
         .layout                                             = pipeline_layout_};
 
-    context::vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &filled_pipeline_), "Failed to create filled geometry pipeline");
+    toolkit::log::vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &filled_pipeline_), "Failed to create filled geometry pipeline");
 
     // Create wireframe pipeline
     auto wireframe_rasterizer        = rasterizer;
@@ -926,7 +927,7 @@ void vk::plugins::Geometry::create_pipelines(const context::EngineContext& eng, 
     wireframe_pipeline_info.pRasterizationState = &wireframe_rasterizer;
     wireframe_pipeline_info.pStages             = wire_stages;
 
-    context::vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &wireframe_pipeline_info, nullptr, &wireframe_pipeline_), "Failed to create wireframe geometry pipeline");
+    toolkit::log::vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &wireframe_pipeline_info, nullptr, &wireframe_pipeline_), "Failed to create wireframe geometry pipeline");
 
     // Create line pipeline for LINE_LIST topology
     const VkPipelineInputAssemblyStateCreateInfo line_input_assembly{.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, .topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST};
@@ -941,7 +942,7 @@ void vk::plugins::Geometry::create_pipelines(const context::EngineContext& eng, 
     line_pipeline_info.pRasterizationState = &line_rasterizer;
     line_pipeline_info.pStages             = line_stages;
 
-    context::vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &line_pipeline_info, nullptr, &line_pipeline_), "Failed to create line geometry pipeline");
+    toolkit::log::vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &line_pipeline_info, nullptr, &line_pipeline_), "Failed to create line geometry pipeline");
 
     vkDestroyShaderModule(eng.device, vert_module, nullptr);
     vkDestroyShaderModule(eng.device, frag_module, nullptr);
@@ -1075,7 +1076,7 @@ void vk::plugins::Geometry::update_instance_buffers(const context::EngineContext
             constexpr VmaAllocationCreateInfo alloc_ci{.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT, .usage = VMA_MEMORY_USAGE_AUTO};
 
             VmaAllocationInfo alloc_info{};
-            context::vk_check(vmaCreateBuffer(eng.allocator, &buffer_ci, &alloc_ci, &buffer, &allocation, &alloc_info), "Failed to create instance buffer");
+            toolkit::log::vk_check(vmaCreateBuffer(eng.allocator, &buffer_ci, &alloc_ci, &buffer, &allocation, &alloc_info), "Failed to create instance buffer");
 
             capacity = required_capacity;
         }

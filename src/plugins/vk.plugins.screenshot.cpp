@@ -5,6 +5,7 @@ module;
 #include <stdexcept>
 #include <vk_mem_alloc.h>
 module vk.plugins.screenshot;
+import vk.toolkit.log;
 
 void vk::plugins::Screenshot::on_pre_render(const context::PluginContext& ctx) {
     if (pending_capture_.buffer != VK_NULL_HANDLE && ctx.engine) {
@@ -61,7 +62,7 @@ void vk::plugins::Screenshot::on_present(context::PluginContext& ctx) {
 
     constexpr VmaAllocationCreateInfo alloc_ci{.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT, .usage = VMA_MEMORY_USAGE_AUTO, .requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT};
 
-    context::vk_check(vmaCreateBuffer(ctx.engine->allocator, &buffer_ci, &alloc_ci, &buffer, &alloc, &alloc_info), "Failed to create screenshot buffer");
+    toolkit::log::vk_check(vmaCreateBuffer(ctx.engine->allocator, &buffer_ci, &alloc_ci, &buffer, &alloc, &alloc_info), "Failed to create screenshot buffer");
 
     const VkImageMemoryBarrier2 to_src{.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
         .srcStageMask                         = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,

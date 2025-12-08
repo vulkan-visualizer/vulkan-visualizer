@@ -4,10 +4,11 @@ import vk.context;
 import vk.plugins.geometry;
 import vk.plugins.viewport3d;
 import vk.plugins.screenshot;
+import vk.toolkit.camera;
 
 int main() {
     vk::engine::VulkanEngine engine;
-    const auto camera = std::make_shared<vk::context::Camera>();
+    const auto camera = std::make_shared<vk::toolkit::camera::Camera>();
     vk::plugins::Viewport3D viewport(camera);
     vk::plugins::Geometry geometry(camera);
     vk::plugins::Screenshot screenshot;
