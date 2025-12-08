@@ -876,7 +876,7 @@ void vk::plugins::Geometry::create_pipelines(const context::EngineContext& eng, 
 
     const VkPipelineRasterizationStateCreateInfo rasterizer{.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         .polygonMode                                               = VK_POLYGON_MODE_FILL,
-        .cullMode                                                  = VK_CULL_MODE_BACK_BIT, // Disable culling to see both front and back faces
+        .cullMode                                                  = VK_CULL_MODE_NONE, // Disable culling to see both front and back faces
         .frontFace                                                 = VK_FRONT_FACE_COUNTER_CLOCKWISE,
         .lineWidth                                                 = 1.0f};
 

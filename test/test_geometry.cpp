@@ -14,12 +14,12 @@ int main() {
     vk::plugins::Geometry geometry;
     vk::plugins::Screenshot screenshot;
 
-    vk::plugins::GeometryBatch batch{vk::plugins::GeometryType::Sphere, vk::plugins::RenderMode::Filled};
+    vk::plugins::GeometryBatch batch{vk::plugins::GeometryType::Plane, vk::plugins::RenderMode::Filled};
     batch.instances.push_back({
         .position = {0.f, 0.f, 0.f},
         .rotation = {0.f, 0.f, 0.f},
         .scale    = {1.f, 1.f, 1.f},
-        .color    = {1.f, 0.f, 0.f},
+        .color    = {1.f, 1.f, 1.f},
         .alpha    = 1.0f,
     });
     geometry.add_batch(batch);
