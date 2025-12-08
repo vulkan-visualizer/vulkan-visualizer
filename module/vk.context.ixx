@@ -73,7 +73,7 @@ namespace vk::context {
     };
 
     export struct AttachmentView {
-        std::string_view name;
+        std::string_view name{};
         VkImage image{VK_NULL_HANDLE};
         VkImageView view{VK_NULL_HANDLE};
         VkFormat format{VK_FORMAT_UNDEFINED};
@@ -88,9 +88,9 @@ namespace vk::context {
         VkSwapchainKHR swapchain{};
         VkFormat swapchain_image_format{};
         VkExtent2D swapchain_extent{};
-        std::vector<VkImage> swapchain_images;
-        std::vector<VkImageView> swapchain_image_views;
-        std::vector<AttachmentResource> color_attachments;
+        std::vector<VkImage> swapchain_images{};
+        std::vector<VkImageView> swapchain_image_views{};
+        std::vector<AttachmentResource> color_attachments{};
         std::optional<AttachmentResource> depth_attachment;
     };
 
@@ -149,10 +149,40 @@ namespace vk::context {
         VkSemaphore imageAcquired{};
         VkSemaphore renderComplete{};
         uint64_t submitted_timeline_value{0};
-        std::vector<std::function<void()>> dq;
+        std::vector<std::function<void()>> dq{};
         VkCommandBuffer asyncComputeCommandBuffer{};
         VkSemaphore asyncComputeFinished{};
         bool asyncComputeSubmitted{false};
         VkCommandPool computeCommandPool{};
+    };
+
+    export enum class PluginPhase : uint32_t {
+        None       = 0,
+        Setup      = 1 << 0,
+        Initialize = 1 << 1,
+        PreRender  = 1 << 2,
+        Render     = 1 << 3,
+        PostRender = 1 << 4,
+        Present    = 1 << 5,
+        Cleanup    = 1 << 6,
+        All        = 0xFFFFFFFF
+    };
+
+    export constexpr PluginPhase operator|(PluginPhase a, PluginPhase b) {
+        return static_cast<PluginPhase>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+    }
+
+    export constexpr bool operator&(PluginPhase a, PluginPhase b) {
+        return (static_cast<uint32_t>(a) & static_cast<uint32_t>(b)) != 0;
+    }
+
+    export struct PluginContext {
+        EngineContext* engine{nullptr};
+        FrameContext* frame{nullptr};
+        RendererCaps* caps{nullptr};
+        VkCommandBuffer* cmd{nullptr};
+        const SDL_Event* event{nullptr};
+        uint64_t frame_number{0};
+        float delta_time{0.0f};
     };
 } // namespace vk::context

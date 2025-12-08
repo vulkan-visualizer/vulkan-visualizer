@@ -9,45 +9,11 @@ export module vk.engine;
 import vk.context;
 
 namespace vk::engine {
-    // ============================================================================
-    // Plugin System Architecture (Concept-Based)
-    // ============================================================================
-
-    export enum class PluginPhase : uint32_t {
-        None            = 0,
-        Setup           = 1 << 0,  // Query capabilities, configure renderer
-        Initialize      = 1 << 1,  // Create resources
-        PreRender       = 1 << 2,  // Before rendering (update, logic)
-        Render          = 1 << 3,  // Graphics/compute recording
-        PostRender      = 1 << 4,  // After rendering (UI, overlays)
-        Present         = 1 << 5,  // Before present (post-processing)
-        Cleanup         = 1 << 6,  // Destroy resources
-        All             = 0xFFFFFFFF
-    };
-
-    export constexpr PluginPhase operator|(PluginPhase a, PluginPhase b) {
-        return static_cast<PluginPhase>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
-    }
-
-    export constexpr bool operator&(PluginPhase a, PluginPhase b) {
-        return (static_cast<uint32_t>(a) & static_cast<uint32_t>(b)) != 0;
-    }
-
-    export struct PluginContext {
-        context::EngineContext* engine{nullptr};
-        context::FrameContext* frame{nullptr};
-        context::RendererCaps* caps{nullptr};
-        VkCommandBuffer* cmd{nullptr};
-        const SDL_Event* event{nullptr};
-        uint64_t frame_number{0};
-        float delta_time{0.0f};
-    };
-
     // Plugin concept - no interfaces, pure concept-based design
     export template <typename T>
-    concept CPlugin = requires(T plugin, PluginContext& ctx, const SDL_Event& event, uint32_t w, uint32_t h) {
+    concept CPlugin = requires(T plugin, context::PluginContext& ctx, const SDL_Event& event, uint32_t w, uint32_t h) {
         { plugin.name() } -> std::convertible_to<const char*>;
-        { plugin.phases() } -> std::convertible_to<PluginPhase>;
+        { plugin.phases() } -> std::convertible_to<context::PluginPhase>;
         { plugin.is_enabled() } -> std::convertible_to<bool>;
         { plugin.set_enabled(true) };
         { plugin.on_setup(ctx) };
@@ -66,13 +32,6 @@ namespace vk::engine {
         void init(CPlugin auto&... plugins);
         void run(CPlugin auto&... plugins);
         void cleanup();
-
-        // Plugin management
-        template<CPlugin T>
-        void enable_plugin(T& plugin) { plugin.set_enabled(true); }
-
-        template<CPlugin T>
-        void disable_plugin(T& plugin) { plugin.set_enabled(false); }
 
         VulkanEngine()                                   = default;
         ~VulkanEngine()                                  = default;
@@ -114,7 +73,7 @@ namespace vk::engine {
             float time_sec{0.0};
             float dt_sec{0.0};
         } state_;
-        std::vector<std::function<void()>> mdq_;
+        std::vector<std::function<void()>> mdq_{};
         context::EngineContext ctx_{};
         context::RendererCaps renderer_caps_{};
         context::SwapchainSystem swapchain_{};
@@ -129,12 +88,14 @@ namespace vk::engine {
 
     void VulkanEngine::init(CPlugin auto&... plugins) {
         // Phase 1: Setup - Collect capabilities from all plugins
-        PluginContext ctx{&ctx_, nullptr, &renderer_caps_, nullptr, nullptr, 0, 0.0f};
-        ([&] {
-            if (plugins.is_enabled() && (plugins.phases() & PluginPhase::Setup)) {
-                plugins.on_setup(ctx);
-            }
-        }(), ...);
+        context::PluginContext ctx{&ctx_, nullptr, &renderer_caps_, nullptr, nullptr, 0, 0.0f};
+        (
+            [&] {
+                if (plugins.is_enabled() && (plugins.phases() & context::PluginPhase::Setup)) {
+                    plugins.on_setup(ctx);
+                }
+            }(),
+            ...);
 
         // Create Vulkan context
         this->process_capacity();
@@ -145,16 +106,18 @@ namespace vk::engine {
 
         // Phase 2: Initialize - Create plugin resources
         ctx.frame = new context::FrameContext(make_frame_context(state_.frame_number, 0u, swapchain_.swapchain_extent));
-        ([&] {
-            if (plugins.is_enabled() && (plugins.phases() & PluginPhase::Initialize)) {
-                plugins.on_initialize(ctx);
-                mdq_.emplace_back([this, &plugins] {
-                    PluginContext cleanup_ctx{};
-                    cleanup_ctx.engine = &ctx_;
-                    plugins.on_cleanup(cleanup_ctx);
-                });
-            }
-        }(), ...);
+        (
+            [&] {
+                if (plugins.is_enabled() && (plugins.phases() & context::PluginPhase::Initialize)) {
+                    plugins.on_initialize(ctx);
+                    mdq_.emplace_back([this, &plugins] {
+                        context::PluginContext cleanup_ctx{};
+                        cleanup_ctx.engine = &ctx_;
+                        plugins.on_cleanup(cleanup_ctx);
+                    });
+                }
+            }(),
+            ...);
         delete ctx.frame;
 
         state_.initialized      = true;
@@ -170,9 +133,7 @@ namespace vk::engine {
             while (SDL_PollEvent(&e)) {
                 switch (e.type) {
                 case SDL_EVENT_QUIT:
-                case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-                    state_.running = false;
-                    break;
+                case SDL_EVENT_WINDOW_CLOSE_REQUESTED: state_.running = false; break;
                 case SDL_EVENT_WINDOW_MINIMIZED:
                     state_.minimized        = true;
                     state_.should_rendering = false;
@@ -182,34 +143,32 @@ namespace vk::engine {
                     state_.minimized        = false;
                     state_.should_rendering = true;
                     break;
-                case SDL_EVENT_WINDOW_FOCUS_GAINED:
-                    state_.focused = true;
-                    break;
-                case SDL_EVENT_WINDOW_FOCUS_LOST:
-                    state_.focused = false;
-                    break;
+                case SDL_EVENT_WINDOW_FOCUS_GAINED: state_.focused = true; break;
+                case SDL_EVENT_WINDOW_FOCUS_LOST: state_.focused = false; break;
                 case SDL_EVENT_WINDOW_RESIZED:
-                case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                    state_.resize_requested = true;
-                    break;
+                case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: state_.resize_requested = true; break;
                 default: break;
                 }
 
                 // Dispatch events to plugins
-                ([&] {
-                    if (plugins.is_enabled()) {
-                        plugins.on_event(e);
-                    }
-                }(), ...);
+                (
+                    [&] {
+                        if (plugins.is_enabled()) {
+                            plugins.on_event(e);
+                        }
+                    }(),
+                    ...);
             }
 
             if (state_.resize_requested) {
                 recreate_swapchain();
-                ([&] {
-                    if (plugins.is_enabled()) {
-                        plugins.on_resize(swapchain_.swapchain_extent.width, swapchain_.swapchain_extent.height);
-                    }
-                }(), ...);
+                (
+                    [&] {
+                        if (plugins.is_enabled()) {
+                            plugins.on_resize(swapchain_.swapchain_extent.width, swapchain_.swapchain_extent.height);
+                        }
+                    }(),
+                    ...);
                 state_.resize_requested = false;
                 continue;
             }
@@ -222,57 +181,55 @@ namespace vk::engine {
             this->begin_frame(image_index, cmd);
             if (cmd == VK_NULL_HANDLE) continue;
 
-            context::FrameContext frm = make_frame_context(state_.frame_number, image_index, swapchain_.swapchain_extent);
-            context::FrameData& frData = frames_[state_.frame_number % context::FRAME_OVERLAP];
+            context::FrameContext frm    = make_frame_context(state_.frame_number, image_index, swapchain_.swapchain_extent);
+            context::FrameData& frData   = frames_[state_.frame_number % context::FRAME_OVERLAP];
             frData.asyncComputeSubmitted = false;
 
-            PluginContext plugin_ctx{
-                &ctx_,
-                &frm,
-                &renderer_caps_,
-                &cmd,
-                nullptr,
-                state_.frame_number,
-                state_.dt_sec
-            };
+            context::PluginContext plugin_ctx{&ctx_, &frm, &renderer_caps_, &cmd, nullptr, state_.frame_number, state_.dt_sec};
 
             // Phase: PreRender (update logic, prepare data)
-            ([&] {
-                if (plugins.is_enabled() && (plugins.phases() & PluginPhase::PreRender)) {
-                    plugins.on_pre_render(plugin_ctx);
-                }
-            }(), ...);
+            (
+                [&] {
+                    if (plugins.is_enabled() && (plugins.phases() & context::PluginPhase::PreRender)) {
+                        plugins.on_pre_render(plugin_ctx);
+                    }
+                }(),
+                ...);
 
             // Phase: Render (graphics commands)
-            ([&] {
-                if (plugins.is_enabled() && (plugins.phases() & PluginPhase::Render)) {
-                    plugins.on_render(plugin_ctx);
-                }
-            }(), ...);
+            (
+                [&] {
+                    if (plugins.is_enabled() && (plugins.phases() & context::PluginPhase::Render)) {
+                        plugins.on_render(plugin_ctx);
+                    }
+                }(),
+                ...);
 
             // Phase: PostRender (UI, overlays)
-            ([&] {
-                if (plugins.is_enabled() && (plugins.phases() & PluginPhase::PostRender)) {
-                    plugins.on_post_render(plugin_ctx);
-                }
-            }(), ...);
+            (
+                [&] {
+                    if (plugins.is_enabled() && (plugins.phases() & context::PluginPhase::PostRender)) {
+                        plugins.on_post_render(plugin_ctx);
+                    }
+                }(),
+                ...);
 
             // Handle presentation mode
             switch (renderer_caps_.presentation_mode) {
-            case context::PresentationMode::EngineBlit:
-                this->blit_offscreen_to_swapchain(image_index, cmd, frm.extent);
-                break;
+            case context::PresentationMode::EngineBlit: this->blit_offscreen_to_swapchain(image_index, cmd, frm.extent); break;
             case context::PresentationMode::RendererComposite:
             case context::PresentationMode::DirectToSwapchain:
             default: break;
             }
 
             // Phase: Present (post-processing before present)
-            ([&] {
-                if (plugins.is_enabled() && (plugins.phases() & PluginPhase::Present)) {
-                    plugins.on_present(plugin_ctx);
-                }
-            }(), ...);
+            (
+                [&] {
+                    if (plugins.is_enabled() && (plugins.phases() & context::PluginPhase::Present)) {
+                        plugins.on_present(plugin_ctx);
+                    }
+                }(),
+                ...);
 
             end_frame(image_index, cmd);
 

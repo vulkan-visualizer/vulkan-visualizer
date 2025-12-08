@@ -128,16 +128,16 @@ namespace vk::plugins {
         log_info(name(), "Plugin created");
     }
 
-    engine::PluginPhase Viewport3DPlugin::phases() const noexcept {
-        return engine::PluginPhase::Setup |
-               engine::PluginPhase::Initialize |
-               engine::PluginPhase::PreRender |
-               engine::PluginPhase::Render |
-               engine::PluginPhase::PostRender |
-               engine::PluginPhase::Cleanup;
+    context::PluginPhase Viewport3DPlugin::phases() const noexcept {
+        return context::PluginPhase::Setup |
+               context::PluginPhase::Initialize |
+               context::PluginPhase::PreRender |
+               context::PluginPhase::Render |
+               context::PluginPhase::PostRender |
+               context::PluginPhase::Cleanup;
     }
 
-    void Viewport3DPlugin::on_setup(engine::PluginContext& ctx) {
+    void Viewport3DPlugin::on_setup(context::PluginContext& ctx) {
         ctx.caps->allow_async_compute = false;
         ctx.caps->presentation_mode = context::PresentationMode::EngineBlit;
         ctx.caps->preferred_swapchain_format = VK_FORMAT_B8G8R8A8_UNORM;
@@ -156,19 +156,19 @@ namespace vk::plugins {
         log_success(name(), "Setup complete: renderer configured");
     }
 
-    void Viewport3DPlugin::on_initialize(engine::PluginContext& ctx) {
+    void Viewport3DPlugin::on_initialize(context::PluginContext& ctx) {
         create_imgui(*ctx.engine, *ctx.frame);
         log_success(name(), "Initialized: UI ready");
     }
 
-    void Viewport3DPlugin::on_pre_render(engine::PluginContext& ctx) {
+    void Viewport3DPlugin::on_pre_render(context::PluginContext& ctx) {
         const auto current_time = SDL_GetTicks();
         const auto dt = static_cast<float>(current_time - last_time_ms_) / 1000.0f;
         last_time_ms_ = current_time;
         camera_.update(dt, viewport_width_, viewport_height_);
     }
 
-    void Viewport3DPlugin::on_render(engine::PluginContext& ctx) {
+    void Viewport3DPlugin::on_render(context::PluginContext& ctx) {
         const auto& target = ctx.frame->color_attachments.front();
         transition_image_layout(*ctx.cmd, target, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
         begin_rendering(*ctx.cmd, target, ctx.frame->extent);
@@ -176,11 +176,11 @@ namespace vk::plugins {
         transition_image_layout(*ctx.cmd, target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
     }
 
-    void Viewport3DPlugin::on_post_render(engine::PluginContext& ctx) {
+    void Viewport3DPlugin::on_post_render(context::PluginContext& ctx) {
         render_imgui(*ctx.cmd, *ctx.frame);
     }
 
-    void Viewport3DPlugin::on_cleanup(engine::PluginContext& ctx) {
+    void Viewport3DPlugin::on_cleanup(context::PluginContext& ctx) {
         if (ctx.engine) {
             vkDeviceWaitIdle(ctx.engine->device);
             destroy_imgui(*ctx.engine);
@@ -532,18 +532,18 @@ namespace vk::plugins {
         }
     }
 
-    engine::PluginPhase ScreenshotPlugin::phases() const noexcept {
-        return engine::PluginPhase::Initialize |
-               engine::PluginPhase::PreRender |
-               engine::PluginPhase::Present |
-               engine::PluginPhase::Cleanup;
+    context::PluginPhase ScreenshotPlugin::phases() const noexcept {
+        return context::PluginPhase::Initialize |
+               context::PluginPhase::PreRender |
+               context::PluginPhase::Present |
+               context::PluginPhase::Cleanup;
     }
 
-    void ScreenshotPlugin::on_initialize(engine::PluginContext& /*ctx*/) {
+    void ScreenshotPlugin::on_initialize(context::PluginContext& /*ctx*/) {
         log_success(name(), "Initialized: Press F1 to capture");
     }
 
-    void ScreenshotPlugin::on_pre_render(engine::PluginContext& ctx) {
+    void ScreenshotPlugin::on_pre_render(context::PluginContext& ctx) {
         if (pending_capture_.buffer != VK_NULL_HANDLE && ctx.engine) {
             vkQueueWaitIdle(ctx.engine->graphics_queue);
 
@@ -566,7 +566,7 @@ namespace vk::plugins {
         }
     }
 
-    void ScreenshotPlugin::on_present(engine::PluginContext& ctx) {
+    void ScreenshotPlugin::on_present(context::PluginContext& ctx) {
         if (!screenshot_requested_) return;
 
         const auto image_index = ctx.frame->image_index;
@@ -574,7 +574,7 @@ namespace vk::plugins {
         screenshot_requested_ = false;
     }
 
-    void ScreenshotPlugin::on_cleanup(engine::PluginContext& ctx) {
+    void ScreenshotPlugin::on_cleanup(context::PluginContext& ctx) {
         if (pending_capture_.buffer != VK_NULL_HANDLE && ctx.engine) {
             vmaDestroyBuffer(ctx.engine->allocator, pending_capture_.buffer, pending_capture_.allocation);
             pending_capture_ = {};
@@ -598,7 +598,7 @@ namespace vk::plugins {
         request_screenshot();
     }
 
-    void ScreenshotPlugin::capture_swapchain(engine::PluginContext& ctx, const uint32_t /*image_index*/) {
+    void ScreenshotPlugin::capture_swapchain(context::PluginContext& ctx, const uint32_t /*image_index*/) {
         if (!ctx.engine || !ctx.cmd || !ctx.frame) return;
 
         const auto width = ctx.frame->extent.width;
@@ -762,15 +762,15 @@ namespace vk::plugins {
         log_info(name(), "Plugin created");
     }
 
-    engine::PluginPhase GeometryPlugin::phases() const noexcept {
-        return engine::PluginPhase::Setup |
-               engine::PluginPhase::Initialize |
-               engine::PluginPhase::PreRender |
-               engine::PluginPhase::Render |
-               engine::PluginPhase::Cleanup;
+    context::PluginPhase GeometryPlugin::phases() const noexcept {
+        return context::PluginPhase::Setup |
+               context::PluginPhase::Initialize |
+               context::PluginPhase::PreRender |
+               context::PluginPhase::Render |
+               context::PluginPhase::Cleanup;
     }
 
-    void GeometryPlugin::on_setup(engine::PluginContext& ctx) {
+    void GeometryPlugin::on_setup(context::PluginContext& ctx) {
         if (!ctx.caps) return;
 
         ctx.caps->uses_depth = VK_TRUE;
@@ -791,7 +791,7 @@ namespace vk::plugins {
         }
     }
 
-    void GeometryPlugin::on_initialize(engine::PluginContext& ctx) {
+    void GeometryPlugin::on_initialize(context::PluginContext& ctx) {
         if (!ctx.frame || ctx.frame->color_attachments.empty()) {
             throw std::runtime_error("GeometryPlugin requires at least one color attachment");
         }
@@ -806,12 +806,12 @@ namespace vk::plugins {
     }
 
 
-    void GeometryPlugin::on_pre_render(engine::PluginContext& ctx) {
+    void GeometryPlugin::on_pre_render(context::PluginContext& ctx) {
         if (!enabled_ || batches_.empty()) return;
         update_instance_buffers(*ctx.engine);
     }
 
-    void GeometryPlugin::on_render(engine::PluginContext& ctx) {
+    void GeometryPlugin::on_render(context::PluginContext& ctx) {
         if (!enabled_ || batches_.empty() || !viewport_plugin_) return;
         if (!ctx.frame || ctx.frame->color_attachments.empty() || !ctx.cmd) return;
 
@@ -902,7 +902,7 @@ namespace vk::plugins {
 
         transition_image_layout(cmd, target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
     }
-    void GeometryPlugin::on_cleanup(engine::PluginContext& ctx) {
+    void GeometryPlugin::on_cleanup(context::PluginContext& ctx) {
         if (ctx.engine) {
             vkDeviceWaitIdle(ctx.engine->device);
             destroy_geometry_meshes(*ctx.engine);

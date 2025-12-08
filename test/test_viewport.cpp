@@ -25,24 +25,24 @@ public:
 
     // Plugin metadata (required by CPlugin concept)
     const char* name() const { return "Wireframe Box"; }
-    vk::engine::PluginPhase phases() const {
-        return vk::engine::PluginPhase::Initialize |
-               vk::engine::PluginPhase::Render |
-               vk::engine::PluginPhase::Cleanup;
+    vk::context::PluginPhase phases() const {
+        return vk::context::PluginPhase::Initialize |
+               vk::context::PluginPhase::Render |
+               vk::context::PluginPhase::Cleanup;
     }
     bool is_enabled() const { return enabled_; }
     void set_enabled(bool e) { enabled_ = e; }
 
     // Phase callbacks
-    void on_setup(vk::engine::PluginContext& ctx) {}
+    void on_setup(vk::context::PluginContext& ctx) {}
 
-    void on_initialize(vk::engine::PluginContext& ctx) {
+    void on_initialize(vk::context::PluginContext& ctx) {
         create_pipeline(*ctx.engine);
     }
 
-    void on_pre_render(vk::engine::PluginContext& ctx) {}
+    void on_pre_render(vk::context::PluginContext& ctx) {}
 
-    void on_render(vk::engine::PluginContext& ctx) {
+    void on_render(vk::context::PluginContext& ctx) {
         if (!is_enabled() || !viewport_plugin_) return;
 
         vk::camera::Camera& camera = viewport_plugin_->get_camera();
@@ -73,10 +73,10 @@ public:
         vkCmdDraw(*ctx.cmd, 24, 1, 0, 0);
     }
 
-    void on_post_render(vk::engine::PluginContext& ctx) {}
-    void on_present(vk::engine::PluginContext& ctx) {}
+    void on_post_render(vk::context::PluginContext& ctx) {}
+    void on_present(vk::context::PluginContext& ctx) {}
 
-    void on_cleanup(vk::engine::PluginContext& ctx) {
+    void on_cleanup(vk::context::PluginContext& ctx) {
         if (ctx.engine) {
             vkDestroyPipeline(ctx.engine->device, pipeline_, nullptr);
             vkDestroyPipelineLayout(ctx.engine->device, layout_, nullptr);

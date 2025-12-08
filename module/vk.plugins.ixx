@@ -25,18 +25,18 @@ namespace vk::plugins {
         [[nodiscard]] static constexpr const char* description() noexcept { return "3D viewport with camera"; }
         [[nodiscard]] static constexpr uint32_t version() noexcept { return 1; }
         [[nodiscard]] static constexpr int32_t priority() noexcept { return 100; }
-        [[nodiscard]] engine::PluginPhase phases() const noexcept;
+        [[nodiscard]] context::PluginPhase phases() const noexcept;
 
         [[nodiscard]] bool is_enabled() const noexcept { return enabled_; }
         void set_enabled(const bool enabled) noexcept { enabled_ = enabled; }
 
-        void on_setup(engine::PluginContext& ctx);
-        void on_initialize(engine::PluginContext& ctx);
-        void on_pre_render(engine::PluginContext& ctx);
-        void on_render(engine::PluginContext& ctx);
-        void on_post_render(engine::PluginContext& ctx);
-        void on_present(engine::PluginContext& /*ctx*/) const noexcept {}
-        void on_cleanup(engine::PluginContext& ctx);
+        void on_setup(context::PluginContext& ctx);
+        void on_initialize(context::PluginContext& ctx);
+        void on_pre_render(context::PluginContext& ctx);
+        void on_render(context::PluginContext& ctx);
+        void on_post_render(context::PluginContext& ctx);
+        void on_present(context::PluginContext& /*ctx*/) const noexcept {}
+        void on_cleanup(context::PluginContext& ctx);
         void on_event(const SDL_Event& event);
         void on_resize(uint32_t width, uint32_t height) noexcept;
 
@@ -98,18 +98,18 @@ namespace vk::plugins {
         [[nodiscard]] static constexpr const char* description() noexcept { return "Screenshot capture system"; }
         [[nodiscard]] static constexpr uint32_t version() noexcept { return 1; }
         [[nodiscard]] static constexpr int32_t priority() noexcept { return 50; }
-        [[nodiscard]] engine::PluginPhase phases() const noexcept;
+        [[nodiscard]] context::PluginPhase phases() const noexcept;
 
         [[nodiscard]] bool is_enabled() const noexcept { return enabled_; }
         void set_enabled(const bool enabled) noexcept { enabled_ = enabled; }
 
-        void on_setup(engine::PluginContext& /*ctx*/) const noexcept {}
-        void on_initialize(engine::PluginContext& ctx);
-        void on_pre_render(engine::PluginContext& ctx);
-        void on_render(engine::PluginContext& /*ctx*/) const noexcept {}
-        void on_post_render(engine::PluginContext& /*ctx*/) const noexcept {}
-        void on_present(engine::PluginContext& ctx);
-        void on_cleanup(engine::PluginContext& ctx);
+        void on_setup(context::PluginContext& /*ctx*/) const noexcept {}
+        void on_initialize(context::PluginContext& ctx);
+        void on_pre_render(context::PluginContext& ctx);
+        void on_render(context::PluginContext& /*ctx*/) const noexcept {}
+        void on_post_render(context::PluginContext& /*ctx*/) const noexcept {}
+        void on_present(context::PluginContext& ctx);
+        void on_cleanup(context::PluginContext& ctx);
         void on_event(const SDL_Event& event);
         void on_resize(uint32_t /*width*/, uint32_t /*height*/) const noexcept {}
 
@@ -119,7 +119,7 @@ namespace vk::plugins {
         [[nodiscard]] const ScreenshotConfig& get_config() const noexcept { return config_; }
 
     private:
-        void capture_swapchain(engine::PluginContext& ctx, uint32_t image_index);
+        void capture_swapchain(context::PluginContext& ctx, uint32_t image_index);
         void save_screenshot(void* pixel_data, uint32_t width, uint32_t height, const std::string& path) const;
         [[nodiscard]] std::string generate_filename() const;
 
@@ -190,18 +190,18 @@ namespace vk::plugins {
         [[nodiscard]] static constexpr const char* description() noexcept { return "Built-in geometry rendering with instancing"; }
         [[nodiscard]] static constexpr uint32_t version() noexcept { return 1; }
         [[nodiscard]] static constexpr int32_t priority() noexcept { return 75; }
-        [[nodiscard]] engine::PluginPhase phases() const noexcept;
+        [[nodiscard]] context::PluginPhase phases() const noexcept;
 
         [[nodiscard]] bool is_enabled() const noexcept { return enabled_; }
         void set_enabled(const bool enabled) noexcept { enabled_ = enabled; }
 
-        void on_setup(engine::PluginContext& ctx);
-        void on_initialize(engine::PluginContext& ctx);
-        void on_pre_render(engine::PluginContext& ctx);
-        void on_render(engine::PluginContext& ctx);
-        void on_post_render(engine::PluginContext& /*ctx*/) const noexcept {}
-        void on_present(engine::PluginContext& /*ctx*/) const noexcept {}
-        void on_cleanup(engine::PluginContext& ctx);
+        void on_setup(context::PluginContext& ctx);
+        void on_initialize(context::PluginContext& ctx);
+        void on_pre_render(context::PluginContext& ctx);
+        void on_render(context::PluginContext& ctx);
+        void on_post_render(context::PluginContext& /*ctx*/) const noexcept {}
+        void on_present(context::PluginContext& /*ctx*/) const noexcept {}
+        void on_cleanup(context::PluginContext& ctx);
         void on_event(const SDL_Event& /*event*/) const noexcept {}
         void on_resize(uint32_t width, uint32_t height) noexcept;
 
