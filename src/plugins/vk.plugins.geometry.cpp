@@ -15,6 +15,7 @@ module;
 module vk.plugins.geometry;
 import vk.context;
 import vk.toolkit.log;
+import vk.toolkit.vulkan;
 
 namespace {
     void create_buffer_with_data(const vk::context::EngineContext& eng, const void* data, VkDeviceSize size, VkBufferUsageFlags usage, VkBuffer& buffer, VmaAllocation& allocation) {
@@ -817,27 +818,8 @@ void vk::plugins::Geometry::on_resize(uint32_t, uint32_t) {
     depth_format_ = VK_FORMAT_UNDEFINED;
 }
 void vk::plugins::Geometry::create_pipelines(const context::EngineContext& eng, VkFormat color_format, VkFormat depth_format) {
-    // Load shaders
-    auto load_shader = [&](const char* filename) -> VkShaderModule {
-        std::ifstream file(std::string("shader/") + filename, std::ios::binary | std::ios::ate);
-        if (!file.is_open()) {
-            throw std::runtime_error(std::format("Failed to open shader file: {}", filename));
-        }
-
-        const size_t file_size = file.tellg();
-        std::vector<char> code(file_size);
-        file.seekg(0);
-        file.read(code.data(), static_cast<std::streamsize>(file_size));
-
-        const VkShaderModuleCreateInfo create_info{.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = code.size(), .pCode = reinterpret_cast<const uint32_t*>(code.data())};
-
-        VkShaderModule module = VK_NULL_HANDLE;
-        toolkit::log::vk_check(vkCreateShaderModule(eng.device, &create_info, nullptr, &module), "Failed to create shader module");
-        return module;
-    };
-
-    const auto vert_module = load_shader("geometry.vert.spv");
-    const auto frag_module = load_shader("geometry.frag.spv");
+    const auto vert_module = toolkit::vulkan::load_shader("geometry.vert.spv", eng.device);
+    const auto frag_module = toolkit::vulkan::load_shader("geometry.frag.spv", eng.device);
 
     // Push constant for MVP matrix
     const VkPushConstantRange push_constant{.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0, .size = sizeof(float) * 16};
@@ -1057,8 +1039,8 @@ void vk::plugins::Geometry::update_instance_buffers(const context::EngineContext
     }
 
     for (size_t i = 0; i < batches_.size(); ++i) {
-        const auto& batch = batches_[i];
-        auto& [buffer, allocation, capacity]    = instance_buffers_[i];
+        const auto& batch                    = batches_[i];
+        auto& [buffer, allocation, capacity] = instance_buffers_[i];
 
         if (batch.instances.empty()) continue;
 

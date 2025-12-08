@@ -8,7 +8,7 @@ namespace vk::toolkit::math {
         float x{}, y{}, z{};
 
         constexpr Vec3() = default;
-        constexpr Vec3(float x, float y, float z) : x(x), y(y), z(z) {}
+        constexpr Vec3(const float x, const float y, const float z) : x(x), y(y), z(z) {}
 
         constexpr Vec3 operator+(const Vec3& o) const {
             return {x + o.x, y + o.y, z + o.z};
@@ -16,10 +16,10 @@ namespace vk::toolkit::math {
         constexpr Vec3 operator-(const Vec3& o) const {
             return {x - o.x, y - o.y, z - o.z};
         }
-        constexpr Vec3 operator*(float s) const {
+        constexpr Vec3 operator*(const float s) const {
             return {x * s, y * s, z * s};
         }
-        constexpr Vec3 operator/(float s) const {
+        constexpr Vec3 operator/(const float s) const {
             return {x / s, y / s, z / s};
         }
         constexpr Vec3& operator+=(const Vec3& o) {
@@ -34,7 +34,7 @@ namespace vk::toolkit::math {
             z -= o.z;
             return *this;
         }
-        constexpr Vec3& operator*=(float s) {
+        constexpr Vec3& operator*=(const float s) {
             x *= s;
             y *= s;
             z *= s;
@@ -73,7 +73,7 @@ namespace vk::toolkit::math {
             result.m = {s.x, u.x, -f.x, 0, s.y, u.y, -f.y, 0, s.z, u.z, -f.z, 0, -s.dot(eye), -u.dot(eye), f.dot(eye), 1};
             return result;
         }
-        [[nodiscard]] static Mat4 perspective(float fov_y_rad, float aspect, float znear, float zfar) {
+        [[nodiscard]] static Mat4 perspective(const float fov_y_rad, const float aspect, const float znear, const float zfar) {
             const float tan_half_fov = std::tan(fov_y_rad * 0.5f);
             Mat4 result{};
             result.m = {1.0f / (aspect * tan_half_fov), 0, 0, 0, 0, -1.0f / tan_half_fov, 0, 0, 0, 0, (zfar + znear) / (znear - zfar), -1, 0, 0, (2.0f * zfar * znear) / (znear - zfar), 0};
@@ -89,4 +89,8 @@ namespace vk::toolkit::math {
             return result;
         }
     };
+
+    export Vec3 extract_position(const Mat4& m) {
+        return Vec3{m.m[12], m.m[13], m.m[14]};
+    }
 } // namespace vk::toolkit::math

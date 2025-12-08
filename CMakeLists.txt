@@ -127,6 +127,7 @@ target_sources(vk_vis
         src/toolkit/vk.toolkit.imgui.cpp
         src/toolkit/vk.toolkit.log.cpp
         src/toolkit/vk.toolkit.math.cpp
+        src/toolkit/vk.toolkit.vulkan.cpp
         src/plugins/vk.plugins.geometry.cpp
         src/plugins/vk.plugins.screenshot.cpp
         src/plugins/vk.plugins.viewport3d.cpp
@@ -142,6 +143,7 @@ target_sources(vk_vis
         module/toolkit/vk.toolkit.imgui.ixx
         module/toolkit/vk.toolkit.log.ixx
         module/toolkit/vk.toolkit.math.ixx
+        module/toolkit/vk.toolkit.vulkan.ixx
         module/plugins/vk.plugins.geometry.ixx
         module/plugins/vk.plugins.screenshot.ixx
         module/plugins/vk.plugins.viewport3d.ixx

@@ -18,34 +18,15 @@ import vk.engine;
 import vk.toolkit.math;
 import vk.toolkit.log;
 import vk.toolkit.camera;
+import vk.toolkit.geometry;
+import vk.toolkit.vulkan;
 
 namespace {
-    struct Vertex {
-        vk::toolkit::math::Vec3 pos{};
-        vk::toolkit::math::Vec3 color{};
-    };
-
     struct MeshBuffer {
         VkBuffer buffer{VK_NULL_HANDLE};
         VkDeviceMemory memory{VK_NULL_HANDLE};
         uint32_t vertex_count{0};
     };
-
-    struct ColoredLine {
-        vk::toolkit::math::Vec3 a{};
-        vk::toolkit::math::Vec3 b{};
-        vk::toolkit::math::Vec3 color{};
-    };
-
-    vk::toolkit::math::Mat4 build_pose(const vk::toolkit::math::Vec3& position, const vk::toolkit::math::Vec3& target, const vk::toolkit::math::Vec3& world_up) {
-        const vk::toolkit::math::Vec3 forward = (target - position).normalized();
-        vk::toolkit::math::Vec3 right         = forward.cross(world_up).normalized();
-        vk::toolkit::math::Vec3 up            = right.cross(forward).normalized();
-
-        vk::toolkit::math::Mat4 m{};
-        m.m = {right.x, right.y, right.z, 0.0f, up.x, up.y, up.z, 0.0f, forward.x, forward.y, forward.z, 0.0f, position.x, position.y, position.z, 1.0f};
-        return m;
-    }
 
     std::vector<vk::toolkit::math::Mat4> generate_nerf_like_camera_path(std::size_t count, float radius, float height_variation) {
         std::vector<vk::toolkit::math::Mat4> poses;
@@ -62,109 +43,14 @@ namespace {
             const float height   = height_variation * std::cos(theta * 1.5f) + wobble * 0.35f;
 
             const vk::toolkit::math::Vec3 position{distance * std::cos(theta), height, distance * std::sin(theta)};
-            poses.push_back(build_pose(position, target, vk::toolkit::math::Vec3{0.0f, 1.0f, 0.0f}));
+            poses.push_back(vk::toolkit::geometry::build_pose(position, target, vk::toolkit::math::Vec3{0.0f, 1.0f, 0.0f}));
         }
 
         return poses;
     }
 
-    vk::toolkit::math::Vec3 extract_position(const vk::toolkit::math::Mat4& m) {
-        return vk::toolkit::math::Vec3{m.m[12], m.m[13], m.m[14]};
-    }
-
-    std::tuple<vk::toolkit::math::Vec3, float> compute_center_and_radius(const std::vector<vk::toolkit::math::Mat4>& poses) {
-        vk::toolkit::math::Vec3 center{0.0f, 0.0f, 0.0f};
-        for (const auto& p : poses) {
-            center += extract_position(p);
-        }
-        if (!poses.empty()) {
-            center = center / static_cast<float>(poses.size());
-        }
-
-        float average_radius = 0.0f;
-        for (const auto& p : poses) {
-            average_radius += (extract_position(p) - center).length();
-        }
-        if (!poses.empty()) average_radius /= static_cast<float>(poses.size());
-
-        return {center, average_radius};
-    }
-
-    std::vector<ColoredLine> make_frustum_lines(const std::vector<vk::toolkit::math::Mat4>& poses, float near_d, float far_d, float fov_deg) {
-        std::vector<ColoredLine> lines;
-        lines.reserve(poses.size() * 12);
-
-        const float fov_rad = fov_deg * std::numbers::pi_v<float> / 180.0f;
-        const float near_h  = std::tan(fov_rad * 0.5f) * near_d;
-        const float near_w  = near_h;
-        const float far_h   = std::tan(fov_rad * 0.5f) * far_d;
-        const float far_w   = far_h;
-        const vk::toolkit::math::Vec3 edge_color{0.95f, 0.76f, 0.32f};
-
-        auto add_line = [&](const vk::toolkit::math::Vec3& a, const vk::toolkit::math::Vec3& b) { lines.push_back(ColoredLine{a, b, edge_color}); };
-
-        for (const auto& pose : poses) {
-            const vk::toolkit::math::Vec3 origin  = extract_position(pose);
-            const vk::toolkit::math::Vec3 right   = {pose.m[0], pose.m[1], pose.m[2]};
-            const vk::toolkit::math::Vec3 up      = {pose.m[4], pose.m[5], pose.m[6]};
-            const vk::toolkit::math::Vec3 forward = {pose.m[8], pose.m[9], pose.m[10]};
-
-            const auto corner = [&](float w, float h, float d) { return origin + forward * d + right * w + up * h; };
-
-            const vk::toolkit::math::Vec3 nlt = corner(-near_w, near_h, near_d);
-            const vk::toolkit::math::Vec3 nrt = corner(near_w, near_h, near_d);
-            const vk::toolkit::math::Vec3 nlb = corner(-near_w, -near_h, near_d);
-            const vk::toolkit::math::Vec3 nrb = corner(near_w, -near_h, near_d);
-
-            const vk::toolkit::math::Vec3 flt = corner(-far_w, far_h, far_d);
-            const vk::toolkit::math::Vec3 frt = corner(far_w, far_h, far_d);
-            const vk::toolkit::math::Vec3 flb = corner(-far_w, -far_h, far_d);
-            const vk::toolkit::math::Vec3 frb = corner(far_w, -far_h, far_d);
-
-            add_line(origin, nlt);
-            add_line(origin, nrt);
-            add_line(origin, nlb);
-            add_line(origin, nrb);
-
-            add_line(nlt, nrt);
-            add_line(nrt, nrb);
-            add_line(nrb, nlb);
-            add_line(nlb, nlt);
-
-            add_line(flt, frt);
-            add_line(frt, frb);
-            add_line(frb, flb);
-            add_line(flb, flt);
-
-            add_line(nlt, flt);
-            add_line(nrt, frt);
-            add_line(nlb, flb);
-            add_line(nrb, frb);
-        }
-
-        return lines;
-    }
-
-    std::vector<ColoredLine> make_axis_lines(const std::vector<vk::toolkit::math::Mat4>& poses, float axis_length) {
-        std::vector<ColoredLine> lines;
-        lines.reserve(poses.size() * 3);
-
-        for (const auto& pose : poses) {
-            const vk::toolkit::math::Vec3 origin  = extract_position(pose);
-            const vk::toolkit::math::Vec3 right   = {pose.m[0], pose.m[1], pose.m[2]};
-            const vk::toolkit::math::Vec3 up      = {pose.m[4], pose.m[5], pose.m[6]};
-            const vk::toolkit::math::Vec3 forward = {pose.m[8], pose.m[9], pose.m[10]};
-
-            lines.push_back({origin, origin + right * axis_length, vk::toolkit::math::Vec3{0.94f, 0.33f, 0.31f}});
-            lines.push_back({origin, origin + up * axis_length, vk::toolkit::math::Vec3{0.37f, 0.82f, 0.36f}});
-            lines.push_back({origin, origin + forward * axis_length, vk::toolkit::math::Vec3{0.32f, 0.60f, 1.0f}});
-        }
-
-        return lines;
-    }
-
-    std::vector<ColoredLine> make_path_lines(const std::vector<vk::toolkit::math::Mat4>& poses) {
-        std::vector<ColoredLine> lines;
+    std::vector<vk::toolkit::geometry::ColoredLine> make_path_lines(const std::vector<vk::toolkit::math::Mat4>& poses) {
+        std::vector<vk::toolkit::geometry::ColoredLine> lines;
         lines.reserve(poses.size());
         if (poses.size() < 2) return lines;
 
@@ -172,26 +58,26 @@ namespace {
         vk::toolkit::math::Vec3 prev = extract_position(poses.front());
         for (std::size_t i = 1; i < poses.size(); ++i) {
             const vk::toolkit::math::Vec3 curr = extract_position(poses[i]);
-            lines.push_back(ColoredLine{prev, curr, color});
+            lines.push_back(vk::toolkit::geometry::ColoredLine{prev, curr, color});
             prev = curr;
         }
-        lines.push_back(ColoredLine{prev, extract_position(poses.front()), color});
+        lines.push_back(vk::toolkit::geometry::ColoredLine{prev, extract_position(poses.front()), color});
         return lines;
     }
 
-    void append_lines(std::vector<Vertex>& out, const std::vector<ColoredLine>& lines) {
+    void append_lines(std::vector<vk::toolkit::geometry::Vertex>& out, const std::vector<vk::toolkit::geometry::ColoredLine>& lines) {
         out.reserve(out.size() + lines.size() * 2);
         for (const auto& l : lines) {
-            out.push_back(Vertex{l.a, l.color});
-            out.push_back(Vertex{l.b, l.color});
+            out.push_back(vk::toolkit::geometry::Vertex{l.a, l.color});
+            out.push_back(vk::toolkit::geometry::Vertex{l.b, l.color});
         }
     }
 
-    MeshBuffer create_vertex_buffer(const vk::context::EngineContext& eng, std::span<const Vertex> vertices) {
+    MeshBuffer create_vertex_buffer(const vk::context::EngineContext& eng, std::span<const vk::toolkit::geometry::Vertex> vertices) {
         MeshBuffer mb{};
         if (vertices.empty()) return mb;
 
-        const VkDeviceSize size = static_cast<VkDeviceSize>(vertices.size() * sizeof(Vertex));
+        const VkDeviceSize size = static_cast<VkDeviceSize>(vertices.size() * sizeof(vk::toolkit::geometry::Vertex));
 
         const VkBufferCreateInfo buffer_ci{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size, .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
 
@@ -224,24 +110,6 @@ namespace {
         mb.vertex_count = static_cast<uint32_t>(vertices.size());
         return mb;
     }
-
-    VkShaderModule load_shader_module(const vk::context::EngineContext& eng, const char* filename) {
-        std::ifstream file(std::string("shader/") + filename, std::ios::binary | std::ios::ate);
-        if (!file.is_open()) {
-            throw std::runtime_error(std::format("Failed to open shader file: {}", filename));
-        }
-
-        const size_t file_size = static_cast<size_t>(file.tellg());
-        std::vector<char> code(file_size);
-        file.seekg(0);
-        file.read(code.data(), static_cast<std::streamsize>(file_size));
-
-        const VkShaderModuleCreateInfo create_info{.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = code.size(), .pCode = reinterpret_cast<const uint32_t*>(code.data())};
-
-        VkShaderModule module = VK_NULL_HANDLE;
-        vk::toolkit::log::vk_check(vkCreateShaderModule(eng.device, &create_info, nullptr, &module), "Failed to create shader module");
-        return module;
-    }
 } // namespace
 
 class CameraTransformPlugin {
@@ -266,12 +134,12 @@ public:
 
     void on_initialize(vk::context::PluginContext&) {
         poses_                             = generate_nerf_like_camera_path(28, 4.0f, 0.6f);
-        std::tie(center_, average_radius_) = compute_center_and_radius(poses_);
+        std::tie(center_, average_radius_) = vk::toolkit::geometry::compute_center_and_radius(poses_);
 
         const float frustum_near = std::max(0.12f, average_radius_ * 0.06f);
         const float frustum_far  = std::max(0.32f, average_radius_ * 0.12f);
-        frustum_lines_           = make_frustum_lines(poses_, frustum_near, frustum_far, 45.0f);
-        axis_lines_              = make_axis_lines(poses_, std::max(0.2f, average_radius_ * 0.08f));
+        frustum_lines_           = vk::toolkit::geometry::make_frustum_lines(poses_, frustum_near, frustum_far, 45.0f);
+        axis_lines_              = vk::toolkit::geometry::make_axis_lines(poses_, std::max(0.2f, average_radius_ * 0.08f));
         path_lines_              = make_path_lines(poses_);
 
         if (camera_) {
@@ -394,7 +262,7 @@ public:
 private:
     void build_mesh(const vk::context::EngineContext& eng) {
         destroy_mesh(eng);
-        std::vector<Vertex> vertices;
+        std::vector<vk::toolkit::geometry::Vertex> vertices;
         append_lines(vertices, frustum_lines_);
         append_lines(vertices, axis_lines_);
         append_lines(vertices, path_lines_);
@@ -404,8 +272,8 @@ private:
     void create_pipeline(const vk::context::EngineContext& eng, VkFormat color_format) {
         color_format_ = color_format;
 
-        const auto vert_module = load_shader_module(eng, "test_camera_transform.vert.spv");
-        const auto frag_module = load_shader_module(eng, "test_camera_transform.frag.spv");
+        const auto vert_module = vk::toolkit::vulkan::load_shader("test_camera_transform.vert.spv", eng.device);
+        const auto frag_module = vk::toolkit::vulkan::load_shader("test_camera_transform.frag.spv", eng.device);
 
         const VkPushConstantRange push_constant{.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0, .size = sizeof(float) * 16};
         const VkPipelineLayoutCreateInfo layout_info{.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .pushConstantRangeCount = 1, .pPushConstantRanges = &push_constant};
@@ -415,10 +283,10 @@ private:
         const VkPipelineShaderStageCreateInfo frag_stage{.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = frag_module, .pName = "main"};
         const VkPipelineShaderStageCreateInfo stages[] = {vert_stage, frag_stage};
 
-        const VkVertexInputBindingDescription binding{.binding = 0, .stride = sizeof(Vertex), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX};
+        const VkVertexInputBindingDescription binding{.binding = 0, .stride = sizeof(vk::toolkit::geometry::Vertex), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX};
         const VkVertexInputAttributeDescription attributes[] = {
-            {.location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Vertex, pos)},
-            {.location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Vertex, color)},
+            {.location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(vk::toolkit::geometry::Vertex, pos)},
+            {.location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(vk::toolkit::geometry::Vertex, color)},
         };
 
         const VkPipelineVertexInputStateCreateInfo vertex_input{.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO, .vertexBindingDescriptionCount = 1, .pVertexBindingDescriptions = &binding, .vertexAttributeDescriptionCount = 2, .pVertexAttributeDescriptions = attributes};
@@ -480,9 +348,9 @@ private:
 
     std::shared_ptr<vk::toolkit::camera::Camera> camera_{};
     std::vector<vk::toolkit::math::Mat4> poses_{};
-    std::vector<ColoredLine> frustum_lines_{};
-    std::vector<ColoredLine> axis_lines_{};
-    std::vector<ColoredLine> path_lines_{};
+    std::vector<vk::toolkit::geometry::ColoredLine> frustum_lines_{};
+    std::vector<vk::toolkit::geometry::ColoredLine> axis_lines_{};
+    std::vector<vk::toolkit::geometry::ColoredLine> path_lines_{};
     vk::toolkit::math::Vec3 center_{0.0f, 0.0f, 0.0f};
     float average_radius_{4.0f};
     uint32_t viewport_width_{1280};
