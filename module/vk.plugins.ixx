@@ -195,7 +195,7 @@ namespace vk::plugins {
         [[nodiscard]] bool is_enabled() const noexcept { return enabled_; }
         void set_enabled(const bool enabled) noexcept { enabled_ = enabled; }
 
-        void on_setup(engine::PluginContext& /*ctx*/) const noexcept {}
+        void on_setup(engine::PluginContext& ctx);
         void on_initialize(engine::PluginContext& ctx);
         void on_pre_render(engine::PluginContext& ctx);
         void on_render(engine::PluginContext& ctx);
@@ -203,7 +203,7 @@ namespace vk::plugins {
         void on_present(engine::PluginContext& /*ctx*/) const noexcept {}
         void on_cleanup(engine::PluginContext& ctx);
         void on_event(const SDL_Event& /*event*/) const noexcept {}
-        void on_resize(uint32_t /*width*/, uint32_t /*height*/) const noexcept {}
+        void on_resize(uint32_t width, uint32_t height) noexcept;
 
         // Batch management
         void add_batch(const GeometryBatch& batch);
@@ -256,7 +256,7 @@ namespace vk::plugins {
             uint32_t capacity{0};
         };
 
-        void create_pipelines(const context::EngineContext& eng);
+        void create_pipelines(const context::EngineContext& eng, VkFormat color_format, VkFormat depth_format);
         void destroy_pipelines(const context::EngineContext& eng);
         void create_geometry_meshes(const context::EngineContext& eng);
         void destroy_geometry_meshes(const context::EngineContext& eng);
@@ -284,5 +284,9 @@ namespace vk::plugins {
 
         std::unordered_map<GeometryType, GeometryMesh> geometry_meshes_;
         std::vector<InstanceBuffer> instance_buffers_;
+
+        VkFormat color_format_{VK_FORMAT_UNDEFINED};
+        VkFormat depth_format_{VK_FORMAT_UNDEFINED};
+        VkImageLayout depth_layout_{VK_IMAGE_LAYOUT_UNDEFINED};
     };
 } // namespace vk::plugins

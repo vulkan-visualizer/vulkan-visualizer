@@ -763,17 +763,48 @@ namespace vk::plugins {
     }
 
     engine::PluginPhase GeometryPlugin::phases() const noexcept {
-        return engine::PluginPhase::Initialize |
+        return engine::PluginPhase::Setup |
+               engine::PluginPhase::Initialize |
                engine::PluginPhase::PreRender |
                engine::PluginPhase::Render |
                engine::PluginPhase::Cleanup;
     }
 
-    void GeometryPlugin::on_initialize(engine::PluginContext& ctx) {
-        create_pipelines(*ctx.engine);
-        create_geometry_meshes(*ctx.engine);
-        log_success(name(), "Initialized → geometry meshes and pipelines ready");
+    void GeometryPlugin::on_setup(engine::PluginContext& ctx) {
+        if (!ctx.caps) return;
+
+        ctx.caps->uses_depth = VK_TRUE;
+        if (!ctx.caps->depth_attachment) {
+            ctx.caps->depth_attachment = context::AttachmentRequest{
+                .name = "depth",
+                .format = ctx.caps->preferred_depth_format,
+                .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                .samples = ctx.caps->color_samples,
+                .aspect = VK_IMAGE_ASPECT_DEPTH_BIT,
+                .initial_layout = VK_IMAGE_LAYOUT_UNDEFINED
+            };
+        } else {
+            ctx.caps->depth_attachment->usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+            if (ctx.caps->depth_attachment->aspect == 0) {
+                ctx.caps->depth_attachment->aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+            }
+        }
     }
+
+    void GeometryPlugin::on_initialize(engine::PluginContext& ctx) {
+        if (!ctx.frame || ctx.frame->color_attachments.empty()) {
+            throw std::runtime_error("GeometryPlugin requires at least one color attachment");
+        }
+
+        color_format_ = ctx.frame->color_attachments.front().format;
+        depth_format_ = ctx.frame->depth_attachment ? ctx.frame->depth_attachment->format : VK_FORMAT_UNDEFINED;
+        depth_layout_ = ctx.frame->depth_attachment ? ctx.frame->depth_attachment->current_layout : VK_IMAGE_LAYOUT_UNDEFINED;
+
+        create_pipelines(*ctx.engine, color_format_, depth_format_);
+        create_geometry_meshes(*ctx.engine);
+        log_success(name(), "Initialized - geometry meshes and pipelines ready");
+    }
+
 
     void GeometryPlugin::on_pre_render(engine::PluginContext& ctx) {
         if (!enabled_ || batches_.empty()) return;
@@ -782,6 +813,80 @@ namespace vk::plugins {
 
     void GeometryPlugin::on_render(engine::PluginContext& ctx) {
         if (!enabled_ || batches_.empty() || !viewport_plugin_) return;
+        if (!ctx.frame || ctx.frame->color_attachments.empty() || !ctx.cmd) return;
+
+        auto& cmd = *ctx.cmd;
+        const auto& target = ctx.frame->color_attachments.front();
+
+        transition_image_layout(cmd, target, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+        constexpr VkClearValue clear_value{.color = {{0.1f, 0.1f, 0.12f, 1.0f}}};
+        VkRenderingAttachmentInfo color_attachment{
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .imageView = target.view,
+            .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+            .clearValue = clear_value
+        };
+
+        VkRenderingAttachmentInfo depth_attachment{};
+        bool has_depth = ctx.frame->depth_attachment && ctx.frame->depth_attachment->view != VK_NULL_HANDLE;
+        if (has_depth) {
+            const auto* depth = ctx.frame->depth_attachment;
+            const VkImageMemoryBarrier2 depth_barrier{
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+                .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+                .dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                .dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                .oldLayout = depth_layout_,
+                .newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                .image = depth->image,
+                .subresourceRange = {depth->aspect, 0, 1, 0, 1}
+            };
+
+            const VkDependencyInfo dep{
+                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                .imageMemoryBarrierCount = 1,
+                .pImageMemoryBarriers = &depth_barrier
+            };
+
+            vkCmdPipelineBarrier2(cmd, &dep);
+            depth_layout_ = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+
+            depth_attachment = VkRenderingAttachmentInfo{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                .imageView = depth->view,
+                .imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                .clearValue = {.depthStencil = {1.0f, 0}}
+            };
+        }
+
+        const VkRenderingInfo rendering_info{
+            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+            .renderArea = {{0, 0}, ctx.frame->extent},
+            .layerCount = 1,
+            .colorAttachmentCount = 1,
+            .pColorAttachments = &color_attachment,
+            .pDepthAttachment = has_depth ? &depth_attachment : nullptr
+        };
+
+        vkCmdBeginRendering(cmd, &rendering_info);
+
+        const VkViewport viewport{
+            .x = 0.0f,
+            .y = 0.0f,
+            .width = static_cast<float>(ctx.frame->extent.width),
+            .height = static_cast<float>(ctx.frame->extent.height),
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f
+        };
+        const VkRect2D scissor{{0, 0}, ctx.frame->extent};
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
 
         const auto& camera = viewport_plugin_->get_camera();
         const auto view_proj = camera.proj_matrix() * camera.view_matrix();
@@ -789,11 +894,14 @@ namespace vk::plugins {
         // Render all batches with instancing
         for (size_t i = 0; i < batches_.size(); ++i) {
             if (!batches_[i].instances.empty() && i < instance_buffers_.size()) {
-                render_batch(*ctx.cmd, batches_[i], instance_buffers_[i], view_proj);
+                render_batch(cmd, batches_[i], instance_buffers_[i], view_proj);
             }
         }
-    }
 
+        vkCmdEndRendering(cmd);
+
+        transition_image_layout(cmd, target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
+    }
     void GeometryPlugin::on_cleanup(engine::PluginContext& ctx) {
         if (ctx.engine) {
             vkDeviceWaitIdle(ctx.engine->device);
@@ -1075,6 +1183,12 @@ namespace vk::plugins {
         }
     }
 
+    void GeometryPlugin::on_resize(const uint32_t /*width*/, const uint32_t /*height*/) noexcept {
+        depth_layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+        color_format_ = VK_FORMAT_UNDEFINED;
+        depth_format_ = VK_FORMAT_UNDEFINED;
+    }
+
     // Helper function to create buffer
     namespace {
         void create_buffer_with_data(const context::EngineContext& eng, const void* data, VkDeviceSize size,
@@ -1107,7 +1221,7 @@ namespace vk::plugins {
     // GeometryPlugin Pipeline and Rendering Implementation
     // ============================================================================
 
-    void GeometryPlugin::create_pipelines(const context::EngineContext& eng) {
+    void GeometryPlugin::create_pipelines(const context::EngineContext& eng, const VkFormat color_format, const VkFormat depth_format) {
         // Load shaders
         auto load_shader = [&](const char* filename) -> VkShaderModule {
             std::ifstream file(std::string("shader/") + filename, std::ios::binary | std::ios::ate);
@@ -1204,7 +1318,7 @@ namespace vk::plugins {
         const VkPipelineRasterizationStateCreateInfo rasterizer{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
             .polygonMode = VK_POLYGON_MODE_FILL,
-            .cullMode = VK_CULL_MODE_BACK_BIT,
+            .cullMode = VK_CULL_MODE_NONE,  // Disable culling to see both front and back faces
             .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
             .lineWidth = 1.0f
         };
@@ -1214,10 +1328,11 @@ namespace vk::plugins {
             .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT
         };
 
+        const bool has_depth = depth_format != VK_FORMAT_UNDEFINED;
         const VkPipelineDepthStencilStateCreateInfo depth_stencil{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-            .depthTestEnable = VK_TRUE,
-            .depthWriteEnable = VK_TRUE,
+            .depthTestEnable = has_depth ? VK_TRUE : VK_FALSE,
+            .depthWriteEnable = has_depth ? VK_TRUE : VK_FALSE,
             .depthCompareOp = VK_COMPARE_OP_LESS
         };
 
@@ -1246,11 +1361,11 @@ namespace vk::plugins {
             .pDynamicStates = dynamic_states
         };
 
-        const VkFormat color_format = VK_FORMAT_B8G8R8A8_UNORM;
         const VkPipelineRenderingCreateInfo rendering_info{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
             .colorAttachmentCount = 1,
-            .pColorAttachmentFormats = &color_format
+            .pColorAttachmentFormats = &color_format,
+            .depthAttachmentFormat = depth_format
         };
 
         const VkGraphicsPipelineCreateInfo pipeline_info{
@@ -1493,19 +1608,20 @@ namespace vk::plugins {
             }
         }
 
-        // Generate indices
+        // Generate indices (CCW from outside)
         for (uint32_t r = 0; r < rings; ++r) {
             for (uint32_t s = 0; s < sectors; ++s) {
                 const auto current = r * (sectors + 1) + s;
                 const auto next = current + sectors + 1;
 
+                // Reversed winding
                 indices.push_back(current);
-                indices.push_back(next);
                 indices.push_back(current + 1);
+                indices.push_back(next);
 
                 indices.push_back(current + 1);
-                indices.push_back(next);
                 indices.push_back(next + 1);
+                indices.push_back(next);
             }
         }
 
@@ -1583,7 +1699,7 @@ namespace vk::plugins {
         std::vector<float> vertices;
         std::vector<uint32_t> indices;
 
-        // Top and bottom caps + sides
+        // Generate side vertices (with radial normals)
         for (uint32_t i = 0; i <= segments; ++i) {
             const auto angle = static_cast<float>(i) / static_cast<float>(segments) * 2.0f * 3.14159265359f;
             const auto x = std::cos(angle);
@@ -1591,23 +1707,68 @@ namespace vk::plugins {
 
             // Bottom vertex
             vertices.push_back(x); vertices.push_back(-0.5f); vertices.push_back(z);
-            vertices.push_back(x); vertices.push_back(0.0f); vertices.push_back(z);
+            vertices.push_back(x); vertices.push_back(0.0f); vertices.push_back(z);  // radial normal
 
             // Top vertex
             vertices.push_back(x); vertices.push_back(0.5f); vertices.push_back(z);
-            vertices.push_back(x); vertices.push_back(0.0f); vertices.push_back(z);
+            vertices.push_back(x); vertices.push_back(0.0f); vertices.push_back(z);  // radial normal
         }
 
-        // Generate side indices
+        const auto side_vertex_count = static_cast<uint32_t>(vertices.size() / 6);
+
+        // Generate side indices (CCW from outside)
         for (uint32_t i = 0; i < segments; ++i) {
             const auto base = i * 2;
-            indices.push_back(base);
-            indices.push_back(base + 2);
-            indices.push_back(base + 1);
+            // Reversed winding for correct CCW from outside
+            indices.push_back(base);      // bottom current
+            indices.push_back(base + 2);  // bottom next
+            indices.push_back(base + 1);  // top current
 
-            indices.push_back(base + 1);
-            indices.push_back(base + 2);
-            indices.push_back(base + 3);
+            indices.push_back(base + 2);  // bottom next
+            indices.push_back(base + 3);  // top next
+            indices.push_back(base + 1);  // top current
+        }
+
+        // Add bottom cap center vertex
+        const auto bottom_center_idx = side_vertex_count;
+        vertices.push_back(0.0f); vertices.push_back(-0.5f); vertices.push_back(0.0f);
+        vertices.push_back(0.0f); vertices.push_back(-1.0f); vertices.push_back(0.0f);  // down normal
+
+        // Add bottom cap ring vertices
+        for (uint32_t i = 0; i <= segments; ++i) {
+            const auto angle = static_cast<float>(i) / static_cast<float>(segments) * 2.0f * 3.14159265359f;
+            const auto x = std::cos(angle);
+            const auto z = std::sin(angle);
+            vertices.push_back(x); vertices.push_back(-0.5f); vertices.push_back(z);
+            vertices.push_back(0.0f); vertices.push_back(-1.0f); vertices.push_back(0.0f);  // down normal
+        }
+
+        // Generate bottom cap indices (CCW from outside = CW when viewed from below)
+        for (uint32_t i = 0; i < segments; ++i) {
+            indices.push_back(bottom_center_idx);
+            indices.push_back(bottom_center_idx + i + 1);
+            indices.push_back(bottom_center_idx + i + 2);
+        }
+
+        // Add top cap center vertex
+        const auto top_center_idx = static_cast<uint32_t>(vertices.size() / 6);
+        vertices.push_back(0.0f); vertices.push_back(0.5f); vertices.push_back(0.0f);
+        vertices.push_back(0.0f); vertices.push_back(1.0f); vertices.push_back(0.0f);  // up normal
+
+        // Add top cap ring vertices
+        for (uint32_t i = 0; i <= segments; ++i) {
+            const auto angle = static_cast<float>(i) / static_cast<float>(segments) * 2.0f * 3.14159265359f;
+            const auto x = std::cos(angle);
+            const auto z = std::sin(angle);
+            vertices.push_back(x); vertices.push_back(0.5f); vertices.push_back(z);
+            vertices.push_back(0.0f); vertices.push_back(1.0f); vertices.push_back(0.0f);  // up normal
+        }
+
+        // Generate top cap indices (CCW from outside)
+        for (uint32_t i = 0; i < segments; ++i) {
+            indices.push_back(top_center_idx);
+            indices.push_back(top_center_idx + i + 2);
+            indices.push_back(top_center_idx + i + 1);
         }
 
         GeometryMesh mesh;
@@ -1631,21 +1792,45 @@ namespace vk::plugins {
         vertices.push_back(0.0f); vertices.push_back(0.5f); vertices.push_back(0.0f);
         vertices.push_back(0.0f); vertices.push_back(1.0f); vertices.push_back(0.0f);
 
-        // Base circle
+        // Side vertices (base circle with radial normals)
         for (uint32_t i = 0; i <= segments; ++i) {
             const auto angle = static_cast<float>(i) / static_cast<float>(segments) * 2.0f * 3.14159265359f;
             const auto x = std::cos(angle);
             const auto z = std::sin(angle);
 
+            // Calculate cone side normal (pointing outward and upward)
+            const auto ny = 0.707f;  // 45 degree slope
+            const auto nr = 0.707f;
             vertices.push_back(x); vertices.push_back(-0.5f); vertices.push_back(z);
-            vertices.push_back(x); vertices.push_back(0.0f); vertices.push_back(z);
+            vertices.push_back(x * nr); vertices.push_back(ny); vertices.push_back(z * nr);
         }
 
-        // Generate side indices
+        // Generate side indices (CCW from outside)
         for (uint32_t i = 0; i < segments; ++i) {
-            indices.push_back(0);
-            indices.push_back(i + 1);
-            indices.push_back(i + 2);
+            indices.push_back(0);      // apex
+            indices.push_back(i + 2);  // next base vertex
+            indices.push_back(i + 1);  // current base vertex
+        }
+
+        // Add base cap center
+        const auto base_center_idx = static_cast<uint32_t>(vertices.size() / 6);
+        vertices.push_back(0.0f); vertices.push_back(-0.5f); vertices.push_back(0.0f);
+        vertices.push_back(0.0f); vertices.push_back(-1.0f); vertices.push_back(0.0f);
+
+        // Add base cap ring (with downward normals)
+        for (uint32_t i = 0; i <= segments; ++i) {
+            const auto angle = static_cast<float>(i) / static_cast<float>(segments) * 2.0f * 3.14159265359f;
+            const auto x = std::cos(angle);
+            const auto z = std::sin(angle);
+            vertices.push_back(x); vertices.push_back(-0.5f); vertices.push_back(z);
+            vertices.push_back(0.0f); vertices.push_back(-1.0f); vertices.push_back(0.0f);
+        }
+
+        // Generate base cap indices (CCW from outside)
+        for (uint32_t i = 0; i < segments; ++i) {
+            indices.push_back(base_center_idx);
+            indices.push_back(base_center_idx + i + 1);
+            indices.push_back(base_center_idx + i + 2);
         }
 
         GeometryMesh mesh;
@@ -1692,13 +1877,14 @@ namespace vk::plugins {
                 const auto a = i * (tube_segments + 1) + j;
                 const auto b = a + tube_segments + 1;
 
+                // Reversed winding
                 indices.push_back(a);
-                indices.push_back(b);
                 indices.push_back(a + 1);
+                indices.push_back(b);
 
                 indices.push_back(a + 1);
-                indices.push_back(b);
                 indices.push_back(b + 1);
+                indices.push_back(b);
             }
         }
 
@@ -1719,7 +1905,7 @@ namespace vk::plugins {
         std::vector<float> vertices;
         std::vector<uint32_t> indices;
 
-        constexpr auto height = 0.5f;
+        constexpr auto height = 0.5f;  // Half-height of cylinder section
         constexpr auto radius = 0.25f;
 
         // Top hemisphere
@@ -1741,7 +1927,58 @@ namespace vk::plugins {
             }
         }
 
+        const auto top_hemisphere_count = static_cast<uint32_t>(vertices.size() / 6);
+
+        // Generate top hemisphere indices
+        for (uint32_t r = 0; r < segments / 2; ++r) {
+            for (uint32_t s = 0; s < segments; ++s) {
+                const auto current = r * (segments + 1) + s;
+                const auto next = current + segments + 1;
+
+                // Reversed winding
+                indices.push_back(current);
+                indices.push_back(current + 1);
+                indices.push_back(next);
+
+                indices.push_back(current + 1);
+                indices.push_back(next + 1);
+                indices.push_back(next);
+            }
+        }
+
+        // Cylinder middle section
+        const auto cylinder_start_idx = static_cast<uint32_t>(vertices.size() / 6);
+        for (uint32_t i = 0; i <= segments; ++i) {
+            const auto angle = static_cast<float>(i) / static_cast<float>(segments) * 2.0f * 3.14159265359f;
+            const auto x = radius * std::cos(angle);
+            const auto z = radius * std::sin(angle);
+            const auto nx = std::cos(angle);
+            const auto nz = std::sin(angle);
+
+            // Bottom of cylinder (at +height)
+            vertices.push_back(x); vertices.push_back(height); vertices.push_back(z);
+            vertices.push_back(nx); vertices.push_back(0.0f); vertices.push_back(nz);
+
+            // Top of cylinder (at -height)
+            vertices.push_back(x); vertices.push_back(-height); vertices.push_back(z);
+            vertices.push_back(nx); vertices.push_back(0.0f); vertices.push_back(nz);
+        }
+
+        // Generate cylinder indices
+        for (uint32_t i = 0; i < segments; ++i) {
+            const auto base = cylinder_start_idx + i * 2;
+            // Reversed winding
+            indices.push_back(base);
+            indices.push_back(base + 2);
+            indices.push_back(base + 1);
+
+            indices.push_back(base + 2);
+            indices.push_back(base + 3);
+            indices.push_back(base + 1);
+        }
+
         // Bottom hemisphere
+        const auto bottom_hemisphere_start = static_cast<uint32_t>(vertices.size() / 6);
         for (uint32_t r = 0; r <= segments / 2; ++r) {
             const auto phi = static_cast<float>(r) / static_cast<float>(segments / 2) * 3.14159265359f * 0.5f;
             for (uint32_t s = 0; s <= segments; ++s) {
@@ -1760,22 +1997,25 @@ namespace vk::plugins {
             }
         }
 
-        // Generate indices (simple approach)
-        const auto vert_count = static_cast<uint32_t>(vertices.size() / 6);
-        for (uint32_t i = 0; i < vert_count - segments - 2; ++i) {
-            if ((i + 1) % (segments + 1) != 0) {
-                indices.push_back(i);
-                indices.push_back(i + segments + 1);
-                indices.push_back(i + 1);
+        // Generate bottom hemisphere indices
+        for (uint32_t r = 0; r < segments / 2; ++r) {
+            for (uint32_t s = 0; s < segments; ++s) {
+                const auto current = bottom_hemisphere_start + r * (segments + 1) + s;
+                const auto next = current + segments + 1;
 
-                indices.push_back(i + 1);
-                indices.push_back(i + segments + 1);
-                indices.push_back(i + segments + 2);
+                // Reversed winding
+                indices.push_back(current);
+                indices.push_back(current + 1);
+                indices.push_back(next);
+
+                indices.push_back(current + 1);
+                indices.push_back(next + 1);
+                indices.push_back(next);
             }
         }
 
         GeometryMesh mesh;
-        mesh.vertex_count = vert_count;
+        mesh.vertex_count = static_cast<uint32_t>(vertices.size() / 6);
         mesh.index_count = static_cast<uint32_t>(indices.size());
         mesh.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
