@@ -6,6 +6,7 @@ module;
 #include <fstream>
 #include <imgui.h>
 #include <print>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -1016,8 +1017,8 @@ void vk::plugins::Geometry::create_geometry_meshes(const context::EngineContext&
     geometry_meshes_[GeometryType::Grid] = GeometryMesh::create_line_mesh(eng);
     geometry_meshes_[GeometryType::Ray]  = GeometryMesh::create_line_mesh(eng);
 }
-namespace vk::plugins {
-    void destroy_mesh(const context::EngineContext& eng, GeometryMesh& mesh) {
+void vk::plugins::Geometry::destroy_geometry_meshes(const context::EngineContext& eng) {
+    for (auto& mesh : geometry_meshes_ | std::views::values) {
         if (mesh.vertex_buffer != VK_NULL_HANDLE) {
             vmaDestroyBuffer(eng.allocator, mesh.vertex_buffer, mesh.vertex_allocation);
             mesh.vertex_buffer = VK_NULL_HANDLE;
@@ -1027,21 +1028,22 @@ namespace vk::plugins {
             mesh.index_buffer = VK_NULL_HANDLE;
         }
     }
-} // namespace vk::plugins
-void vk::plugins::Geometry::destroy_geometry_meshes(const context::EngineContext& eng) {
-    for (auto& [type, mesh] : geometry_meshes_) {
-        destroy_mesh(eng, mesh);
-    }
     geometry_meshes_.clear();
 
-    for (auto& [type, mesh] : normal_meshes_) {
-        destroy_mesh(eng, mesh);
+    for (auto& mesh : normal_meshes_ | std::views::values) {
+        if (mesh.vertex_buffer != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(eng.allocator, mesh.vertex_buffer, mesh.vertex_allocation);
+            mesh.vertex_buffer = VK_NULL_HANDLE;
+        }
+        if (mesh.index_buffer != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(eng.allocator, mesh.index_buffer, mesh.index_allocation);
+            mesh.index_buffer = VK_NULL_HANDLE;
+        }
     }
     normal_meshes_.clear();
 
     for (size_t i = 0; i < instance_buffers_.size(); ++i) {
-        auto& inst_buf = instance_buffers_[i];
-        if (inst_buf.buffer != VK_NULL_HANDLE) {
+        if (const auto& inst_buf = instance_buffers_[i]; inst_buf.buffer != VK_NULL_HANDLE) {
             vmaDestroyBuffer(eng.allocator, inst_buf.buffer, inst_buf.allocation);
         }
     }
@@ -1055,7 +1057,7 @@ void vk::plugins::Geometry::update_instance_buffers(const context::EngineContext
 
     for (size_t i = 0; i < batches_.size(); ++i) {
         const auto& batch = batches_[i];
-        auto& inst_buf    = instance_buffers_[i];
+        auto& [buffer, allocation, capacity]    = instance_buffers_[i];
 
         if (batch.instances.empty()) continue;
 
@@ -1063,9 +1065,9 @@ void vk::plugins::Geometry::update_instance_buffers(const context::EngineContext
         const VkDeviceSize buffer_size   = static_cast<VkDeviceSize>(required_capacity) * sizeof(GeometryInstance);
 
         // Reallocate if needed
-        if (inst_buf.capacity < required_capacity) {
-            if (inst_buf.buffer != VK_NULL_HANDLE) {
-                vmaDestroyBuffer(eng.allocator, inst_buf.buffer, inst_buf.allocation);
+        if (capacity < required_capacity) {
+            if (buffer != VK_NULL_HANDLE) {
+                vmaDestroyBuffer(eng.allocator, buffer, allocation);
             }
 
             const VkBufferCreateInfo buffer_ci{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = buffer_size, .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
@@ -1073,16 +1075,16 @@ void vk::plugins::Geometry::update_instance_buffers(const context::EngineContext
             constexpr VmaAllocationCreateInfo alloc_ci{.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT, .usage = VMA_MEMORY_USAGE_AUTO};
 
             VmaAllocationInfo alloc_info{};
-            context::vk_check(vmaCreateBuffer(eng.allocator, &buffer_ci, &alloc_ci, &inst_buf.buffer, &inst_buf.allocation, &alloc_info), "Failed to create instance buffer");
+            context::vk_check(vmaCreateBuffer(eng.allocator, &buffer_ci, &alloc_ci, &buffer, &allocation, &alloc_info), "Failed to create instance buffer");
 
-            inst_buf.capacity = required_capacity;
+            capacity = required_capacity;
         }
 
         // Update buffer data
         void* data = nullptr;
-        vmaMapMemory(eng.allocator, inst_buf.allocation, &data);
+        vmaMapMemory(eng.allocator, allocation, &data);
         std::memcpy(data, batch.instances.data(), buffer_size);
-        vmaUnmapMemory(eng.allocator, inst_buf.allocation);
+        vmaUnmapMemory(eng.allocator, allocation);
     }
 }
 void vk::plugins::Geometry::render_batch(VkCommandBuffer& cmd, const GeometryBatch& batch, const InstanceBuffer& instance_buffer, const context::Mat4& view_proj) {

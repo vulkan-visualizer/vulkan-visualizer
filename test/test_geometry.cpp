@@ -12,7 +12,7 @@ int main() {
     vk::plugins::Geometry geometry(camera);
     vk::plugins::Screenshot screenshot;
 
-    vk::plugins::GeometryBatch batch{vk::plugins::GeometryType::Plane, vk::plugins::RenderMode::Filled};
+    vk::plugins::GeometryBatch batch{vk::plugins::GeometryType::Sphere, vk::plugins::RenderMode::Filled};
     batch.instances.push_back({
         .position = {0.f, 0.f, 0.f},
         .rotation = {0.f, 0.f, 0.f},
