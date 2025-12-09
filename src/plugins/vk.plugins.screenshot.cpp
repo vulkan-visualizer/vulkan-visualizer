@@ -101,9 +101,9 @@ void vk::plugins::Screenshot::on_present(context::PluginContext& ctx) {
     screenshot_requested_ = false;
 }
 void vk::plugins::Screenshot::on_cleanup(const context::PluginContext& ctx) {
-    if (pending_capture_.buffer != VK_NULL_HANDLE && ctx.engine) {
-        vmaDestroyBuffer(ctx.engine->allocator, pending_capture_.buffer, pending_capture_.allocation);
-        pending_capture_ = {};
+    if (this->pending_capture_.buffer != VK_NULL_HANDLE && ctx.engine) {
+        vmaDestroyBuffer(ctx.engine->allocator, this->pending_capture_.buffer, this->pending_capture_.allocation);
+        this->pending_capture_ = {};
     }
 }
 void vk::plugins::Screenshot::on_event(const SDL_Event& event) {
@@ -113,7 +113,7 @@ void vk::plugins::Screenshot::on_event(const SDL_Event& event) {
 }
 
 std::string vk::plugins::Screenshot::generate_filename() const {
-    if (!config_.auto_filename) return std::format("{}/{}", config_.output_directory, config_.filename_prefix);
+    if (!this->config_.auto_filename) return std::format("{}/{}", this->config_.output_directory, this->config_.filename_prefix);
 
     const auto now        = std::chrono::system_clock::now();
     const auto time_t_now = std::chrono::system_clock::to_time_t(now);
@@ -127,9 +127,9 @@ std::string vk::plugins::Screenshot::generate_filename() const {
 #endif
 
     std::ostringstream oss;
-    oss << config_.output_directory << "/" << config_.filename_prefix << "_" << std::put_time(&tm, "%Y%m%d_%H%M%S") << "_" << std::setfill('0') << std::setw(3) << ms.count();
+    oss << this->config_.output_directory << "/" << this->config_.filename_prefix << "_" << std::put_time(&tm, "%Y%m%d_%H%M%S") << "_" << std::setfill('0') << std::setw(3) << ms.count();
 
-    switch (config_.format) {
+    switch (this->config_.format) {
     case ScreenshotFormat::PNG: oss << ".png"; break;
     case ScreenshotFormat::JPG: oss << ".jpg"; break;
     case ScreenshotFormat::BMP: oss << ".bmp"; break;

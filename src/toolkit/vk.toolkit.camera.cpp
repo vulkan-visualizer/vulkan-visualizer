@@ -11,27 +11,27 @@ module vk.toolkit.camera;
 
 
 void vk::toolkit::camera::Camera::update(float dt_sec, int viewport_w, int viewport_h) {
-    viewport_width_  = std::max(1, viewport_w);
-    viewport_height_ = std::max(1, viewport_h);
+    this->viewport_width_  = std::max(1, viewport_w);
+    this->viewport_height_ = std::max(1, viewport_h);
     apply_inertia(dt_sec);
 
     // Update fly mode movement
-    if (state_.mode == CameraMode::Fly) {
-        const float speed     = 2.0f * (key_shift_ ? 3.5f : 1.0f) * (key_ctrl_ ? 0.25f : 1.0f);
+    if (this->state_.mode == CameraMode::Fly) {
+        const float speed     = 2.0f * (this->key_shift_ ? 3.5f : 1.0f) * (this->key_ctrl_ ? 0.25f : 1.0f);
         const float move      = speed * dt_sec;
-        const float yaw_rad   = state_.fly_yaw_deg * std::numbers::pi_v<float> / 180.0f;
-        const float pitch_rad = state_.fly_pitch_deg * std::numbers::pi_v<float> / 180.0f;
+        const float yaw_rad   = this->state_.fly_yaw_deg * std::numbers::pi_v<float> / 180.0f;
+        const float pitch_rad = this->state_.fly_pitch_deg * std::numbers::pi_v<float> / 180.0f;
 
         const math::Vec3 fwd{std::cos(pitch_rad) * std::cos(yaw_rad), std::sin(pitch_rad), std::cos(pitch_rad) * std::sin(yaw_rad)};
         const math::Vec3 right = fwd.cross(math::Vec3{0, 1, 0}).normalized();
         const math::Vec3 up    = right.cross(fwd).normalized();
 
-        if (key_w_) state_.eye += fwd * move;
-        if (key_s_) state_.eye -= fwd * move;
-        if (key_a_) state_.eye -= right * move;
-        if (key_d_) state_.eye += right * move;
-        if (key_q_) state_.eye -= up * move;
-        if (key_e_) state_.eye += up * move;
+        if (this->key_w_) this->state_.eye += fwd * move;
+        if (this->key_s_) this->state_.eye -= fwd * move;
+        if (this->key_a_) this->state_.eye -= right * move;
+        if (this->key_d_) this->state_.eye += right * move;
+        if (this->key_q_) this->state_.eye -= up * move;
+        if (this->key_e_) this->state_.eye += up * move;
     }
 
     recompute_matrices();
@@ -39,22 +39,22 @@ void vk::toolkit::camera::Camera::update(float dt_sec, int viewport_w, int viewp
 void vk::toolkit::camera::Camera::handle_event(const SDL_Event& event) {
     switch (event.type) {
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
-        if (event.button.button == SDL_BUTTON_LEFT) lmb_ = true;
-        if (event.button.button == SDL_BUTTON_MIDDLE) mmb_ = true;
-        if (event.button.button == SDL_BUTTON_RIGHT) rmb_ = true;
-        last_mx_ = static_cast<int>(event.button.x);
-        last_my_ = static_cast<int>(event.button.y);
-        if (state_.mode == CameraMode::Fly && rmb_) {
-            fly_capturing_ = true;
+        if (event.button.button == SDL_BUTTON_LEFT) this->lmb_ = true;
+        if (event.button.button == SDL_BUTTON_MIDDLE) this->mmb_ = true;
+        if (event.button.button == SDL_BUTTON_RIGHT) this->rmb_ = true;
+        this->last_mx_ = static_cast<int>(event.button.x);
+        this->last_my_ = static_cast<int>(event.button.y);
+        if (this->state_.mode == CameraMode::Fly && this->rmb_) {
+            this->fly_capturing_ = true;
         }
         break;
 
     case SDL_EVENT_MOUSE_BUTTON_UP:
-        if (event.button.button == SDL_BUTTON_LEFT) lmb_ = false;
-        if (event.button.button == SDL_BUTTON_MIDDLE) mmb_ = false;
+        if (event.button.button == SDL_BUTTON_LEFT) this->lmb_ = false;
+        if (event.button.button == SDL_BUTTON_MIDDLE) this->mmb_ = false;
         if (event.button.button == SDL_BUTTON_RIGHT) {
-            rmb_           = false;
-            fly_capturing_ = false;
+            this->rmb_           = false;
+            this->fly_capturing_ = false;
         }
         break;
 
@@ -65,46 +65,46 @@ void vk::toolkit::camera::Camera::handle_event(const SDL_Event& event) {
             const int dx = static_cast<int>(event.motion.xrel);
             const int dy = static_cast<int>(event.motion.yrel);
 
-            if (state_.mode == CameraMode::Orbit) {
-                const bool houdini_nav = key_space_ || key_alt_;
+            if (this->state_.mode == CameraMode::Orbit) {
+                const bool houdini_nav = this->key_space_ || this->key_alt_;
                 if (houdini_nav) {
-                    if (lmb_) {
+                    if (this->lmb_) {
                         // Rotate
                         constexpr float sens = 0.25f;
-                        state_.yaw_deg += dx * sens;
-                        state_.pitch_deg += dy * sens;
-                        state_.pitch_deg = std::clamp(state_.pitch_deg, -89.5f, 89.5f);
-                        yaw_vel_         = dx * sens * 10.0f;
-                        pitch_vel_       = dy * sens * 10.0f;
-                    } else if (mmb_) {
+                        this->state_.yaw_deg += dx * sens;
+                        this->state_.pitch_deg += dy * sens;
+                        this->state_.pitch_deg = std::clamp(this->state_.pitch_deg, -89.5f, 89.5f);
+                        this->yaw_vel_         = dx * sens * 10.0f;
+                        this->pitch_vel_       = dy * sens * 10.0f;
+                    } else if (this->mmb_) {
                         // Pan
-                        const float base                = state_.projection == ProjectionMode::Orthographic ? std::max(1e-4f, state_.ortho_height) : std::max(1e-4f, state_.distance);
-                        const float pan_speed           = base * 0.0015f * (key_shift_ ? 4.0f : 1.0f);
-                        const float yaw_rad             = state_.yaw_deg * std::numbers::pi_v<float> / 180.0f;
+                        const float base                = this->state_.projection == ProjectionMode::Orthographic ? std::max(1e-4f, this->state_.ortho_height) : std::max(1e-4f, this->state_.distance);
+                        const float pan_speed           = base * 0.0015f * (this->key_shift_ ? 4.0f : 1.0f);
+                        const float yaw_rad             = this->state_.yaw_deg * std::numbers::pi_v<float> / 180.0f;
                         const math::Vec3 right = math::Vec3{std::cos(yaw_rad), 0, std::sin(yaw_rad)}.cross(math::Vec3{0, 1, 0}).normalized();
-                        state_.target -= right * (dx * pan_speed);
-                        state_.target += math::Vec3{0, 1, 0} * (dy * pan_speed);
-                        pan_x_vel_ = -dx * pan_speed * 10.0f;
-                        pan_y_vel_ = dy * pan_speed * 10.0f;
-                    } else if (rmb_) {
+                        this->state_.target -= right * (dx * pan_speed);
+                        this->state_.target += math::Vec3{0, 1, 0} * (dy * pan_speed);
+                        this->pan_x_vel_ = -dx * pan_speed * 10.0f;
+                        this->pan_y_vel_ = dy * pan_speed * 10.0f;
+                    } else if (this->rmb_) {
                         // Dolly/Zoom
-                        const float factor = std::exp(dy * 0.01f * (key_shift_ ? 2.0f : 1.0f));
-                        if (state_.projection == ProjectionMode::Perspective) {
-                            state_.distance = std::clamp(state_.distance * factor, 1e-4f, 1e6f);
+                        const float factor = std::exp(dy * 0.01f * (this->key_shift_ ? 2.0f : 1.0f));
+                        if (this->state_.projection == ProjectionMode::Perspective) {
+                            this->state_.distance = std::clamp(this->state_.distance * factor, 1e-4f, 1e6f);
                         } else {
-                            state_.ortho_height = std::clamp(state_.ortho_height * factor, 1e-4f, 1e6f);
+                            this->state_.ortho_height = std::clamp(this->state_.ortho_height * factor, 1e-4f, 1e6f);
                         }
-                        zoom_vel_ = (factor - 1.0f) * 4.0f;
+                        this->zoom_vel_ = (factor - 1.0f) * 4.0f;
                     }
-                    last_mx_ = mx;
-                    last_my_ = my;
+                    this->last_mx_ = mx;
+                    this->last_my_ = my;
                 }
-            } else if (state_.mode == CameraMode::Fly) {
-                if (rmb_ && fly_capturing_) {
+            } else if (this->state_.mode == CameraMode::Fly) {
+                if (this->rmb_ && this->fly_capturing_) {
                     constexpr float sens = 0.15f;
-                    state_.fly_yaw_deg += dx * sens;
-                    state_.fly_pitch_deg += dy * sens;
-                    state_.fly_pitch_deg = std::clamp(state_.fly_pitch_deg, -89.0f, 89.0f);
+                    this->state_.fly_yaw_deg += dx * sens;
+                    this->state_.fly_pitch_deg += dy * sens;
+                    this->state_.fly_pitch_deg = std::clamp(this->state_.fly_pitch_deg, -89.0f, 89.0f);
                 }
             }
         }
@@ -113,14 +113,14 @@ void vk::toolkit::camera::Camera::handle_event(const SDL_Event& event) {
     case SDL_EVENT_MOUSE_WHEEL:
         {
             const float scroll = static_cast<float>(event.wheel.y);
-            if (state_.mode == CameraMode::Orbit) {
-                const float z = std::exp(-scroll * 0.1f * (key_shift_ ? 2.0f : 1.0f));
-                if (state_.projection == ProjectionMode::Perspective) {
-                    state_.distance = std::clamp(state_.distance * z, 1e-4f, 1e6f);
+            if (this->state_.mode == CameraMode::Orbit) {
+                const float z = std::exp(-scroll * 0.1f * (this->key_shift_ ? 2.0f : 1.0f));
+                if (this->state_.projection == ProjectionMode::Perspective) {
+                    this->state_.distance = std::clamp(this->state_.distance * z, 1e-4f, 1e6f);
                 } else {
-                    state_.ortho_height = std::clamp(state_.ortho_height * z, 1e-4f, 1e6f);
+                    this->state_.ortho_height = std::clamp(this->state_.ortho_height * z, 1e-4f, 1e6f);
                 }
-                zoom_vel_ += -scroll * 0.25f;
+                this->zoom_vel_ += -scroll * 0.25f;
             }
         }
         break;
@@ -128,16 +128,16 @@ void vk::toolkit::camera::Camera::handle_event(const SDL_Event& event) {
     case SDL_EVENT_KEY_DOWN:
         {
             const SDL_Keycode k = event.key.key;
-            if (k == SDLK_W) key_w_ = true;
-            if (k == SDLK_A) key_a_ = true;
-            if (k == SDLK_S) key_s_ = true;
-            if (k == SDLK_D) key_d_ = true;
-            if (k == SDLK_Q) key_q_ = true;
-            if (k == SDLK_E) key_e_ = true;
-            if (k == SDLK_LSHIFT || k == SDLK_RSHIFT) key_shift_ = true;
-            if (k == SDLK_LCTRL || k == SDLK_RCTRL) key_ctrl_ = true;
-            if (k == SDLK_SPACE) key_space_ = true;
-            if (k == SDLK_LALT || k == SDLK_RALT) key_alt_ = true;
+            if (k == SDLK_W) this->key_w_ = true;
+            if (k == SDLK_A) this->key_a_ = true;
+            if (k == SDLK_S) this->key_s_ = true;
+            if (k == SDLK_D) this->key_d_ = true;
+            if (k == SDLK_Q) this->key_q_ = true;
+            if (k == SDLK_E) this->key_e_ = true;
+            if (k == SDLK_LSHIFT || k == SDLK_RSHIFT) this->key_shift_ = true;
+            if (k == SDLK_LCTRL || k == SDLK_RCTRL) this->key_ctrl_ = true;
+            if (k == SDLK_SPACE) this->key_space_ = true;
+            if (k == SDLK_LALT || k == SDLK_RALT) this->key_alt_ = true;
             if (k == SDLK_H) home_view();
         }
         break;
@@ -145,16 +145,16 @@ void vk::toolkit::camera::Camera::handle_event(const SDL_Event& event) {
     case SDL_EVENT_KEY_UP:
         {
             const SDL_Keycode k = event.key.key;
-            if (k == SDLK_W) key_w_ = false;
-            if (k == SDLK_A) key_a_ = false;
-            if (k == SDLK_S) key_s_ = false;
-            if (k == SDLK_D) key_d_ = false;
-            if (k == SDLK_Q) key_q_ = false;
-            if (k == SDLK_E) key_e_ = false;
-            if (k == SDLK_LSHIFT || k == SDLK_RSHIFT) key_shift_ = false;
-            if (k == SDLK_LCTRL || k == SDLK_RCTRL) key_ctrl_ = false;
-            if (k == SDLK_SPACE) key_space_ = false;
-            if (k == SDLK_LALT || k == SDLK_RALT) key_alt_ = false;
+            if (k == SDLK_W) this->key_w_ = false;
+            if (k == SDLK_A) this->key_a_ = false;
+            if (k == SDLK_S) this->key_s_ = false;
+            if (k == SDLK_D) this->key_d_ = false;
+            if (k == SDLK_Q) this->key_q_ = false;
+            if (k == SDLK_E) this->key_e_ = false;
+            if (k == SDLK_LSHIFT || k == SDLK_RSHIFT) this->key_shift_ = false;
+            if (k == SDLK_LCTRL || k == SDLK_RCTRL) this->key_ctrl_ = false;
+            if (k == SDLK_SPACE) this->key_space_ = false;
+            if (k == SDLK_LALT || k == SDLK_RALT) this->key_alt_ = false;
         }
         break;
 
@@ -245,7 +245,7 @@ void vk::toolkit::camera::Camera::draw_imgui_panel() {
     ImGui::BulletText("Fly Mode: Hold RMB + WASDQE");
 
     if (changed) {
-        set_state(state);
+        this->set_state(state);
     }
 
     ImGui::End();
@@ -354,24 +354,24 @@ void vk::toolkit::camera::Camera::recompute_matrices() {
 }
 void vk::toolkit::camera::Camera::apply_inertia(float dt) {
     const float damp = std::exp(-dt * 6.0f);
-    if (!(lmb_ || rmb_ || mmb_) && state_.mode == CameraMode::Orbit) {
-        state_.yaw_deg += yaw_vel_ * dt;
-        state_.pitch_deg += pitch_vel_ * dt;
-        state_.pitch_deg = std::clamp(state_.pitch_deg, -89.5f, 89.5f);
-        state_.target.x += pan_x_vel_ * dt;
-        state_.target.y += pan_y_vel_ * dt;
+    if (!(this->lmb_ || this->rmb_ || this->mmb_) && this->state_.mode == CameraMode::Orbit) {
+        this->state_.yaw_deg += this->yaw_vel_ * dt;
+        this->state_.pitch_deg += this->pitch_vel_ * dt;
+        this->state_.pitch_deg = std::clamp(this->state_.pitch_deg, -89.5f, 89.5f);
+        this->state_.target.x += this->pan_x_vel_ * dt;
+        this->state_.target.y += this->pan_y_vel_ * dt;
 
-        if (state_.projection == ProjectionMode::Perspective) {
-            state_.distance *= (1.0f + zoom_vel_ * dt);
+        if (this->state_.projection == ProjectionMode::Perspective) {
+            this->state_.distance *= (1.0f + this->zoom_vel_ * dt);
         } else {
-            state_.ortho_height *= (1.0f + zoom_vel_ * dt);
-            state_.ortho_height = std::clamp(state_.ortho_height, 1e-4f, 1e6f);
+            this->state_.ortho_height *= (1.0f + this->zoom_vel_ * dt);
+            this->state_.ortho_height = std::clamp(this->state_.ortho_height, 1e-4f, 1e6f);
         }
 
-        yaw_vel_ *= damp;
-        pitch_vel_ *= damp;
-        pan_x_vel_ *= damp;
-        pan_y_vel_ *= damp;
-        zoom_vel_ *= damp;
+        this->yaw_vel_ *= damp;
+        this->pitch_vel_ *= damp;
+        this->pan_x_vel_ *= damp;
+        this->pan_y_vel_ *= damp;
+        this->zoom_vel_ *= damp;
     }
 }

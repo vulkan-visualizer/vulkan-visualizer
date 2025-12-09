@@ -43,6 +43,6 @@ void vk::plugins::Viewport3D::on_event(const SDL_Event& event) const {
     }
 }
 void vk::plugins::Viewport3D::on_resize(const uint32_t width, const uint32_t height) {
-    viewport_width_  = static_cast<int>(width);
-    viewport_height_ = static_cast<int>(height);
+    this->viewport_width_  = static_cast<int>(width);
+    this->viewport_height_ = static_cast<int>(height);
 }

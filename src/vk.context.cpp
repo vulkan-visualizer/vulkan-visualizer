@@ -25,7 +25,13 @@ void vk::context::DescriptorAllocator::destroy_pool(VkDevice device) const {
     if (pool) vkDestroyDescriptorPool(device, pool, nullptr);
 }
 VkDescriptorSet vk::context::DescriptorAllocator::allocate(VkDevice device, VkDescriptorSetLayout layout) const {
-    const VkDescriptorSetAllocateInfo ai{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .pNext = nullptr, .descriptorPool = pool, .descriptorSetCount = 1u, .pSetLayouts = &layout};
+    const VkDescriptorSetAllocateInfo ai{
+        .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .pNext              = nullptr,
+        .descriptorPool     = this->pool,
+        .descriptorSetCount = 1u,
+        .pSetLayouts        = &layout,
+    };
     VkDescriptorSet ds{};
     toolkit::log::vk_check(vkAllocateDescriptorSets(device, &ai, &ds));
     return ds;

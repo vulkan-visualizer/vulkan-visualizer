@@ -24,104 +24,104 @@ import vk.toolkit.log;
 
 void vk::engine::VulkanEngine::process_capacity() {
     auto ensure_ext = [&](const char* name) {
-        if (std::ranges::find(renderer_caps_.extra_device_extensions, name) == renderer_caps_.extra_device_extensions.end()) renderer_caps_.extra_device_extensions.push_back(name);
+        if (std::ranges::find(this->renderer_caps_.extra_device_extensions, name) == this->renderer_caps_.extra_device_extensions.end()) this->renderer_caps_.extra_device_extensions.push_back(name);
     };
-    if (renderer_caps_.need_acceleration_structure) {
+    if (this->renderer_caps_.need_acceleration_structure) {
         ensure_ext(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
         ensure_ext(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
     }
-    if (renderer_caps_.need_ray_tracing_pipeline) {
+    if (this->renderer_caps_.need_ray_tracing_pipeline) {
         ensure_ext(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
         ensure_ext(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
         ensure_ext(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
     }
-    if (renderer_caps_.need_ray_query) {
+    if (this->renderer_caps_.need_ray_query) {
         ensure_ext(VK_KHR_RAY_QUERY_EXTENSION_NAME);
         ensure_ext(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
     }
-    if (renderer_caps_.need_mesh_shader) {
+    if (this->renderer_caps_.need_mesh_shader) {
         ensure_ext(VK_EXT_MESH_SHADER_EXTENSION_NAME);
     }
-    if (renderer_caps_.buffer_device_address) {
+    if (this->renderer_caps_.buffer_device_address) {
         ensure_ext(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
     }
-    renderer_caps_.swapchain_usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    if (renderer_caps_.presentation_mode != context::PresentationMode::DirectToSwapchain && renderer_caps_.color_attachments.empty()) renderer_caps_.color_attachments.push_back(context::AttachmentRequest{.name = "hdr_color"});
-    if (renderer_caps_.presentation_attachment.empty() && !renderer_caps_.color_attachments.empty()) renderer_caps_.presentation_attachment = renderer_caps_.color_attachments.front().name;
+    this->renderer_caps_.swapchain_usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    if (this->renderer_caps_.presentation_mode != context::PresentationMode::DirectToSwapchain && this->renderer_caps_.color_attachments.empty()) this->renderer_caps_.color_attachments.push_back(context::AttachmentRequest{.name = "hdr_color"});
+    if (this->renderer_caps_.presentation_attachment.empty() && !this->renderer_caps_.color_attachments.empty()) this->renderer_caps_.presentation_attachment = this->renderer_caps_.color_attachments.front().name;
     bool found = false;
-    for (const auto& att : renderer_caps_.color_attachments) {
-        if (att.name == renderer_caps_.presentation_attachment) {
+    for (const auto& att : this->renderer_caps_.color_attachments) {
+        if (att.name == this->renderer_caps_.presentation_attachment) {
             found = true;
             break;
         }
     }
-    if (!found && !renderer_caps_.color_attachments.empty()) renderer_caps_.presentation_attachment = renderer_caps_.color_attachments.front().name;
-    for (auto& att : renderer_caps_.color_attachments) {
+    if (!found && !this->renderer_caps_.color_attachments.empty()) this->renderer_caps_.presentation_attachment = this->renderer_caps_.color_attachments.front().name;
+    for (auto& att : this->renderer_caps_.color_attachments) {
         if (att.aspect == 0) att.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-        if (att.samples == VK_SAMPLE_COUNT_1_BIT) att.samples = renderer_caps_.color_samples;
-        if (renderer_caps_.presentation_mode == context::PresentationMode::EngineBlit && att.name == renderer_caps_.presentation_attachment) att.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        if (att.samples == VK_SAMPLE_COUNT_1_BIT) att.samples = this->renderer_caps_.color_samples;
+        if (this->renderer_caps_.presentation_mode == context::PresentationMode::EngineBlit && att.name == this->renderer_caps_.presentation_attachment) att.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     }
-    if (renderer_caps_.presentation_mode == context::PresentationMode::EngineBlit) renderer_caps_.swapchain_usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    if (renderer_caps_.uses_depth == VK_TRUE && !renderer_caps_.depth_attachment.has_value()) {
-        renderer_caps_.depth_attachment =
-            context::AttachmentRequest{.name = "depth", .format = renderer_caps_.preferred_depth_format, .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, .samples = renderer_caps_.color_samples, .aspect = VK_IMAGE_ASPECT_DEPTH_BIT, .initial_layout = VK_IMAGE_LAYOUT_UNDEFINED};
+    if (this->renderer_caps_.presentation_mode == context::PresentationMode::EngineBlit) this->renderer_caps_.swapchain_usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    if (this->renderer_caps_.uses_depth == VK_TRUE && !this->renderer_caps_.depth_attachment.has_value()) {
+        this->renderer_caps_.depth_attachment =
+            context::AttachmentRequest{.name = "depth", .format = this->renderer_caps_.preferred_depth_format, .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, .samples = this->renderer_caps_.color_samples, .aspect = VK_IMAGE_ASPECT_DEPTH_BIT, .initial_layout = VK_IMAGE_LAYOUT_UNDEFINED};
     }
-    if (renderer_caps_.depth_attachment) {
-        renderer_caps_.uses_depth = VK_TRUE;
-        if (renderer_caps_.depth_attachment->aspect == 0) renderer_caps_.depth_attachment->aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
-        if (renderer_caps_.depth_attachment->samples == VK_SAMPLE_COUNT_1_BIT) renderer_caps_.depth_attachment->samples = renderer_caps_.color_samples;
+    if (this->renderer_caps_.depth_attachment) {
+        this->renderer_caps_.uses_depth = VK_TRUE;
+        if (this->renderer_caps_.depth_attachment->aspect == 0) this->renderer_caps_.depth_attachment->aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+        if (this->renderer_caps_.depth_attachment->samples == VK_SAMPLE_COUNT_1_BIT) this->renderer_caps_.depth_attachment->samples = this->renderer_caps_.color_samples;
     } else {
-        renderer_caps_.uses_depth = VK_FALSE;
+        this->renderer_caps_.uses_depth = VK_FALSE;
     }
-    renderer_caps_.uses_offscreen = renderer_caps_.color_attachments.empty() ? VK_FALSE : VK_TRUE;
-    if (renderer_caps_.presentation_mode == context::PresentationMode::DirectToSwapchain) {
-        renderer_caps_.uses_offscreen = VK_FALSE;
-        renderer_caps_.presentation_attachment.clear();
+    this->renderer_caps_.uses_offscreen = this->renderer_caps_.color_attachments.empty() ? VK_FALSE : VK_TRUE;
+    if (this->renderer_caps_.presentation_mode == context::PresentationMode::DirectToSwapchain) {
+        this->renderer_caps_.uses_offscreen = VK_FALSE;
+        this->renderer_caps_.presentation_attachment.clear();
     }
 }
 void vk::engine::VulkanEngine::create_context() {
     vkb::InstanceBuilder ib;
     ib.set_app_name(this->state_.name.c_str()).request_validation_layers(false).use_default_debug_messenger().require_api_version(1, 3, 0);
-    for (const char* ext : renderer_caps_.extra_instance_extensions) ib.enable_extension(ext);
+    for (const char* ext : this->renderer_caps_.extra_instance_extensions) ib.enable_extension(ext);
     const vkb::Instance vkb_inst = ib.build().value();
-    ctx_.instance                = vkb_inst.instance;
-    ctx_.debug_messenger         = vkb_inst.debug_messenger;
+    this->ctx_.instance                = vkb_inst.instance;
+    this->ctx_.debug_messenger         = vkb_inst.debug_messenger;
     const int sdl_init_rc        = SDL_Init(SDL_INIT_VIDEO);
     REQUIRE_TRUE(sdl_init_rc, std::string("SDL_Init failed: ") + SDL_GetError());
-    ctx_.window = SDL_CreateWindow(this->state_.name.c_str(), static_cast<int>(this->state_.width), static_cast<int>(this->state_.height), SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
-    REQUIRE_TRUE(ctx_.window != nullptr, std::string("SDL_CreateWindow failed: ") + SDL_GetError());
-    REQUIRE_TRUE(SDL_Vulkan_CreateSurface(ctx_.window, ctx_.instance, nullptr, &ctx_.surface), std::string("SDL_Vulkan_CreateSurface failed: ") + SDL_GetError());
+    this->ctx_.window = SDL_CreateWindow(this->state_.name.c_str(), static_cast<int>(this->state_.width), static_cast<int>(this->state_.height), SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+    REQUIRE_TRUE(this->ctx_.window != nullptr, std::string("SDL_CreateWindow failed: ") + SDL_GetError());
+    REQUIRE_TRUE(SDL_Vulkan_CreateSurface(this->ctx_.window, this->ctx_.instance, nullptr, &this->ctx_.surface), std::string("SDL_Vulkan_CreateSurface failed: ") + SDL_GetError());
     VkPhysicalDeviceVulkan13Features f13{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, .pNext = nullptr, .synchronization2 = VK_TRUE, .dynamicRendering = VK_TRUE};
-    VkPhysicalDeviceVulkan12Features f12{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &f13, .descriptorIndexing = VK_TRUE, .bufferDeviceAddress = renderer_caps_.buffer_device_address ? VK_TRUE : VK_FALSE};
+    VkPhysicalDeviceVulkan12Features f12{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &f13, .descriptorIndexing = VK_TRUE, .bufferDeviceAddress = this->renderer_caps_.buffer_device_address ? VK_TRUE : VK_FALSE};
     vkb::PhysicalDeviceSelector selector(vkb_inst);
-    selector.set_surface(ctx_.surface).set_minimum_version(1, 3).set_required_features_12(f12);
-    for (const char* ext : renderer_caps_.extra_device_extensions) selector.add_required_extension(ext);
+    selector.set_surface(this->ctx_.surface).set_minimum_version(1, 3).set_required_features_12(f12);
+    for (const char* ext : this->renderer_caps_.extra_device_extensions) selector.add_required_extension(ext);
     vkb::PhysicalDevice phys = selector.select().value();
-    ctx_.physical            = phys.physical_device;
+    this->ctx_.physical            = phys.physical_device;
     vkb::DeviceBuilder db(phys);
     vkb::Device vkbDev         = db.build().value();
-    ctx_.device                = vkbDev.device;
-    ctx_.graphics_queue        = vkbDev.get_queue(vkb::QueueType::graphics).value();
-    ctx_.compute_queue         = vkbDev.get_queue(vkb::QueueType::compute).value();
-    ctx_.transfer_queue        = vkbDev.get_queue(vkb::QueueType::transfer).value();
-    ctx_.present_queue         = ctx_.graphics_queue;
-    ctx_.graphics_queue_family = vkbDev.get_queue_index(vkb::QueueType::graphics).value();
-    ctx_.compute_queue_family  = vkbDev.get_queue_index(vkb::QueueType::compute).value();
-    ctx_.transfer_queue_family = vkbDev.get_queue_index(vkb::QueueType::transfer).value();
-    ctx_.present_queue_family  = ctx_.graphics_queue_family;
-    VmaAllocatorCreateInfo ac{.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT, .physicalDevice = ctx_.physical, .device = ctx_.device, .instance = ctx_.instance, .vulkanApiVersion = VK_API_VERSION_1_3};
-    toolkit::log::vk_check(vmaCreateAllocator(&ac, &ctx_.allocator));
-    mdq_.emplace_back([&] { vmaDestroyAllocator(ctx_.allocator); });
+    this->ctx_.device                = vkbDev.device;
+    this->ctx_.graphics_queue        = vkbDev.get_queue(vkb::QueueType::graphics).value();
+    this->ctx_.compute_queue         = vkbDev.get_queue(vkb::QueueType::compute).value();
+    this->ctx_.transfer_queue        = vkbDev.get_queue(vkb::QueueType::transfer).value();
+    this->ctx_.present_queue         = this->ctx_.graphics_queue;
+    this->ctx_.graphics_queue_family = vkbDev.get_queue_index(vkb::QueueType::graphics).value();
+    this->ctx_.compute_queue_family  = vkbDev.get_queue_index(vkb::QueueType::compute).value();
+    this->ctx_.transfer_queue_family = vkbDev.get_queue_index(vkb::QueueType::transfer).value();
+    this->ctx_.present_queue_family  = this->ctx_.graphics_queue_family;
+    VmaAllocatorCreateInfo ac{.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT, .physicalDevice = this->ctx_.physical, .device = this->ctx_.device, .instance = this->ctx_.instance, .vulkanApiVersion = VK_API_VERSION_1_3};
+    toolkit::log::vk_check(vmaCreateAllocator(&ac, &this->ctx_.allocator));
+    this->mdq_.emplace_back([&] { vmaDestroyAllocator(this->ctx_.allocator); });
 
     std::vector<context::DescriptorAllocator::PoolSizeRatio> sizes = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2.0f}, {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4.0f}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4.0f}, {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4.0f}};
-    ctx_.descriptor_allocator.init_pool(ctx_.device, 128, sizes);
-    mdq_.emplace_back([&] { ctx_.descriptor_allocator.destroy_pool(ctx_.device); });
+    this->ctx_.descriptor_allocator.init_pool(this->ctx_.device, 128, sizes);
+    this->mdq_.emplace_back([&] { this->ctx_.descriptor_allocator.destroy_pool(this->ctx_.device); });
 
     VkSemaphoreTypeCreateInfo type_ci{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO, .pNext = nullptr, .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = 0};
     VkSemaphoreCreateInfo sem_ci{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &type_ci, .flags = 0u};
-    toolkit::log::vk_check(vkCreateSemaphore(ctx_.device, &sem_ci, nullptr, &render_timeline_));
-    mdq_.emplace_back([&] { vkDestroySemaphore(ctx_.device, render_timeline_, nullptr); });
-    timeline_value_ = 0;
+    toolkit::log::vk_check(vkCreateSemaphore(this->ctx_.device, &sem_ci, nullptr, &this->render_timeline_));
+    this->mdq_.emplace_back([&] { vkDestroySemaphore(this->ctx_.device, this->render_timeline_, nullptr); });
+    this->timeline_value_ = 0;
 }
 void vk::engine::VulkanEngine::destroy_context() {
     for (auto& f : std::ranges::reverse_view(mdq_)) f();
@@ -156,24 +156,24 @@ void vk::engine::VulkanEngine::destroy_swapchain() {
     IF_NOT_NULL_DO_AND_SET(swapchain_.swapchain, vkDestroySwapchainKHR(ctx_.device, swapchain_.swapchain, nullptr), VK_NULL_HANDLE);
 }
 void vk::engine::VulkanEngine::recreate_swapchain() {
-    vkDeviceWaitIdle(ctx_.device);
+    vkDeviceWaitIdle(this->ctx_.device);
     destroy_swapchain();
     destroy_renderer_targets();
     int pxw = 0, pxh = 0;
-    SDL_GetWindowSizeInPixels(ctx_.window, &pxw, &pxh);
+    SDL_GetWindowSizeInPixels(this->ctx_.window, &pxw, &pxh);
     this->state_.width  = std::max(1, pxw);
     this->state_.height = std::max(1, pxh);
     create_swapchain();
     create_renderer_targets();
-    context::FrameContext frm = make_frame_context(state_.frame_number, 0u, swapchain_.swapchain_extent);
+    context::FrameContext frm = make_frame_context(this->state_.frame_number, 0u, this->swapchain_.swapchain_extent);
     frm.swapchain_image       = VK_NULL_HANDLE;
     frm.swapchain_image_view  = VK_NULL_HANDLE;
-    state_.resize_requested   = false;
+    this->state_.resize_requested   = false;
 }
 void vk::engine::VulkanEngine::create_renderer_targets() {
-    destroy_renderer_targets();
-    swapchain_.color_attachments.clear();
-    swapchain_.color_attachments.reserve(renderer_caps_.color_attachments.size());
+    this->destroy_renderer_targets();
+    this->swapchain_.color_attachments.clear();
+    this->swapchain_.color_attachments.reserve(this->renderer_caps_.color_attachments.size());
     auto create_image = [&](const context::AttachmentRequest& req, context::AttachmentResource& out) {
         VkImageCreateInfo imgci{.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
             .pNext                     = nullptr,
@@ -191,7 +191,7 @@ void vk::engine::VulkanEngine::create_renderer_targets() {
             .pQueueFamilyIndices       = nullptr,
             .initialLayout             = req.initial_layout};
         constexpr VmaAllocationCreateInfo ainfo{.flags = 0u, .usage = VMA_MEMORY_USAGE_GPU_ONLY, .requiredFlags = static_cast<VkMemoryPropertyFlags>(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT), .preferredFlags = 0u, .memoryTypeBits = 0u, .pool = VK_NULL_HANDLE, .pUserData = nullptr, .priority = 1.0f};
-        toolkit::log::vk_check(vmaCreateImage(ctx_.allocator, &imgci, &ainfo, &out.image.image, &out.image.allocation, nullptr));
+        toolkit::log::vk_check(vmaCreateImage(this->ctx_.allocator, &imgci, &ainfo, &out.image.image, &out.image.allocation, nullptr));
         const VkImageViewCreateInfo viewci{.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
             .pNext                                = nullptr,
             .flags                                = 0u,
@@ -200,7 +200,7 @@ void vk::engine::VulkanEngine::create_renderer_targets() {
             .format                               = req.format,
             .components                           = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
             .subresourceRange                     = {req.aspect, 0u, 1u, 0u, 1u}};
-        toolkit::log::vk_check(vkCreateImageView(ctx_.device, &viewci, nullptr, &out.image.imageView));
+        toolkit::log::vk_check(vkCreateImageView(this->ctx_.device, &viewci, nullptr, &out.image.imageView));
         out.image.imageFormat = req.format;
         out.image.imageExtent = {this->state_.width, this->state_.height, 1u};
         out.usage             = req.usage;
@@ -208,29 +208,29 @@ void vk::engine::VulkanEngine::create_renderer_targets() {
         out.samples           = req.samples;
         out.initial_layout    = req.initial_layout;
     };
-    for (const auto& req : renderer_caps_.color_attachments) {
+    for (const auto& req : this->renderer_caps_.color_attachments) {
         context::AttachmentResource res{};
         res.name = req.name;
         create_image(req, res);
-        swapchain_.color_attachments.push_back(std::move(res));
+        this->swapchain_.color_attachments.push_back(std::move(res));
     }
-    if (renderer_caps_.depth_attachment) {
+    if (this->renderer_caps_.depth_attachment) {
         context::AttachmentResource depth{};
-        depth.name = renderer_caps_.depth_attachment->name.empty() ? "depth" : renderer_caps_.depth_attachment->name;
-        create_image(*renderer_caps_.depth_attachment, depth);
-        swapchain_.depth_attachment = std::move(depth);
+        depth.name = this->renderer_caps_.depth_attachment->name.empty() ? "depth" : this->renderer_caps_.depth_attachment->name;
+        create_image(*this->renderer_caps_.depth_attachment, depth);
+        this->swapchain_.depth_attachment = std::move(depth);
     } else {
-        swapchain_.depth_attachment.reset();
+        this->swapchain_.depth_attachment.reset();
     }
-    presentation_attachment_index_ = -1;
-    for (size_t i = 0; i < swapchain_.color_attachments.size(); ++i) {
-        if (swapchain_.color_attachments[i].name == renderer_caps_.presentation_attachment) {
-            presentation_attachment_index_ = static_cast<int>(i);
+    this->presentation_attachment_index_ = -1;
+    for (size_t i = 0; i < this->swapchain_.color_attachments.size(); ++i) {
+        if (this->swapchain_.color_attachments[i].name == this->renderer_caps_.presentation_attachment) {
+            this->presentation_attachment_index_ = static_cast<int>(i);
             break;
         }
     }
-    if (presentation_attachment_index_ == -1 && !swapchain_.color_attachments.empty()) presentation_attachment_index_ = 0;
-    mdq_.emplace_back([&] { destroy_renderer_targets(); });
+    if (this->presentation_attachment_index_ == -1 && !this->swapchain_.color_attachments.empty()) this->presentation_attachment_index_ = 0;
+    this->mdq_.emplace_back([&] { destroy_renderer_targets(); });
 }
 void vk::engine::VulkanEngine::destroy_renderer_targets() {
     for (auto& att : swapchain_.color_attachments) {
@@ -249,24 +249,24 @@ void vk::engine::VulkanEngine::destroy_renderer_targets() {
     presentation_attachment_index_ = -1;
 }
 void vk::engine::VulkanEngine::create_command_buffers() {
-    const VkCommandPoolCreateInfo pci{.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .pNext = nullptr, .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, .queueFamilyIndex = ctx_.graphics_queue_family};
-    for (auto& fr : frames_) {
-        toolkit::log::vk_check(vkCreateCommandPool(ctx_.device, &pci, nullptr, &fr.commandPool));
+    const VkCommandPoolCreateInfo pci{.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .pNext = nullptr, .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, .queueFamilyIndex = this->ctx_.graphics_queue_family};
+    for (auto& fr : this->frames_) {
+        toolkit::log::vk_check(vkCreateCommandPool(this->ctx_.device, &pci, nullptr, &fr.commandPool));
         VkCommandBufferAllocateInfo ai{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .pNext = nullptr, .commandPool = fr.commandPool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1u};
-        toolkit::log::vk_check(vkAllocateCommandBuffers(ctx_.device, &ai, &fr.mainCommandBuffer));
+        toolkit::log::vk_check(vkAllocateCommandBuffers(this->ctx_.device, &ai, &fr.mainCommandBuffer));
         VkSemaphoreCreateInfo sci{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = nullptr, .flags = 0u};
-        toolkit::log::vk_check(vkCreateSemaphore(ctx_.device, &sci, nullptr, &fr.imageAcquired));
-        toolkit::log::vk_check(vkCreateSemaphore(ctx_.device, &sci, nullptr, &fr.renderComplete));
-        if (renderer_caps_.allow_async_compute && ctx_.compute_queue && ctx_.compute_queue != ctx_.graphics_queue) {
-            VkCommandPoolCreateInfo cpool{.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .pNext = nullptr, .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, .queueFamilyIndex = ctx_.compute_queue_family};
-            toolkit::log::vk_check(vkCreateCommandPool(ctx_.device, &cpool, nullptr, &fr.computeCommandPool));
+        toolkit::log::vk_check(vkCreateSemaphore(this->ctx_.device, &sci, nullptr, &fr.imageAcquired));
+        toolkit::log::vk_check(vkCreateSemaphore(this->ctx_.device, &sci, nullptr, &fr.renderComplete));
+        if (this->renderer_caps_.allow_async_compute && this->ctx_.compute_queue && this->ctx_.compute_queue != this->ctx_.graphics_queue) {
+            VkCommandPoolCreateInfo cpool{.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .pNext = nullptr, .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, .queueFamilyIndex = this->ctx_.compute_queue_family};
+            toolkit::log::vk_check(vkCreateCommandPool(this->ctx_.device, &cpool, nullptr, &fr.computeCommandPool));
             VkCommandBufferAllocateInfo cai{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .pNext = nullptr, .commandPool = fr.computeCommandPool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1u};
-            toolkit::log::vk_check(vkAllocateCommandBuffers(ctx_.device, &cai, &fr.asyncComputeCommandBuffer));
+            toolkit::log::vk_check(vkAllocateCommandBuffers(this->ctx_.device, &cai, &fr.asyncComputeCommandBuffer));
             VkSemaphoreCreateInfo sci2{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = nullptr, .flags = 0u};
-            toolkit::log::vk_check(vkCreateSemaphore(ctx_.device, &sci2, nullptr, &fr.asyncComputeFinished));
+            toolkit::log::vk_check(vkCreateSemaphore(this->ctx_.device, &sci2, nullptr, &fr.asyncComputeFinished));
         }
     }
-    mdq_.emplace_back([&] { destroy_command_buffers(); });
+    this->mdq_.emplace_back([&] { this->destroy_command_buffers(); });
 }
 void vk::engine::VulkanEngine::destroy_command_buffers() {
     for (auto& fr : frames_) {
@@ -304,7 +304,7 @@ void vk::engine::VulkanEngine::begin_frame(uint32_t& image_index, VkCommandBuffe
 }
 void vk::engine::VulkanEngine::end_frame(uint32_t image_index, const VkCommandBuffer& cmd) {
     toolkit::log::vk_check(vkEndCommandBuffer(cmd));
-    context::FrameData& fr = frames_[state_.frame_number % context::FRAME_OVERLAP];
+    context::FrameData& fr = this->frames_[this->state_.frame_number % context::FRAME_OVERLAP];
     VkCommandBufferSubmitInfo cbsi{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .pNext = nullptr, .commandBuffer = cmd, .deviceMask = 0u};
     VkSemaphoreSubmitInfo waitInfos[2]{};
     uint32_t waitCount   = 0;
@@ -314,17 +314,17 @@ void vk::engine::VulkanEngine::end_frame(uint32_t image_index, const VkCommandBu
         waitInfos[waitCount] = VkSemaphoreSubmitInfo{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .pNext = nullptr, .semaphore = fr.asyncComputeFinished, .value = 0u, .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, .deviceIndex = 0u};
         waitCount++;
     }
-    timeline_value_++;
-    const uint64_t timeline_to_signal = timeline_value_;
+    this->timeline_value_++;
+    const uint64_t timeline_to_signal = this->timeline_value_;
     VkSemaphoreSubmitInfo signalInfos[2]{VkSemaphoreSubmitInfo{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .pNext = nullptr, .semaphore = fr.renderComplete, .value = 0u, .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, .deviceIndex = 0u},
-        VkSemaphoreSubmitInfo{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .pNext = nullptr, .semaphore = render_timeline_, .value = timeline_to_signal, .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, .deviceIndex = 0u}};
+        VkSemaphoreSubmitInfo{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .pNext = nullptr, .semaphore = this->render_timeline_, .value = timeline_to_signal, .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, .deviceIndex = 0u}};
     const VkSubmitInfo2 si{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2, .pNext = nullptr, .waitSemaphoreInfoCount = waitCount, .pWaitSemaphoreInfos = waitInfos, .commandBufferInfoCount = 1, .pCommandBufferInfos = &cbsi, .signalSemaphoreInfoCount = 2u, .pSignalSemaphoreInfos = signalInfos};
-    toolkit::log::vk_check(vkQueueSubmit2(ctx_.graphics_queue, 1, &si, VK_NULL_HANDLE));
+    toolkit::log::vk_check(vkQueueSubmit2(this->ctx_.graphics_queue, 1, &si, VK_NULL_HANDLE));
     fr.submitted_timeline_value = timeline_to_signal;
-    const VkPresentInfoKHR pi{.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, .pNext = nullptr, .waitSemaphoreCount = 1u, .pWaitSemaphores = &fr.renderComplete, .swapchainCount = 1u, .pSwapchains = &swapchain_.swapchain, .pImageIndices = &image_index, .pResults = nullptr};
-    const VkResult pres = vkQueuePresentKHR(ctx_.graphics_queue, &pi);
+    const VkPresentInfoKHR pi{.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, .pNext = nullptr, .waitSemaphoreCount = 1u, .pWaitSemaphores = &fr.renderComplete, .swapchainCount = 1u, .pSwapchains = &this->swapchain_.swapchain, .pImageIndices = &image_index, .pResults = nullptr};
+    const VkResult pres = vkQueuePresentKHR(this->ctx_.graphics_queue, &pi);
     if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
-        state_.resize_requested = true;
+        this->state_.resize_requested = true;
         return;
     }
     toolkit::log::vk_check(pres);
@@ -386,44 +386,44 @@ vk::context::FrameContext vk::engine::VulkanEngine::make_frame_context(const uin
     frm.frame_index      = frame_index;
     frm.image_index      = image_index;
     frm.extent           = extent;
-    frm.swapchain_format = swapchain_.swapchain_image_format;
-    frm.dt_sec           = state_.dt_sec;
-    frm.time_sec         = state_.time_sec;
-    if (image_index < swapchain_.swapchain_images.size()) {
-        frm.swapchain_image      = swapchain_.swapchain_images[image_index];
-        frm.swapchain_image_view = swapchain_.swapchain_image_views[image_index];
+    frm.swapchain_format = this->swapchain_.swapchain_image_format;
+    frm.dt_sec           = this->state_.dt_sec;
+    frm.time_sec         = this->state_.time_sec;
+    if (image_index < this->swapchain_.swapchain_images.size()) {
+        frm.swapchain_image      = this->swapchain_.swapchain_images[image_index];
+        frm.swapchain_image_view = this->swapchain_.swapchain_image_views[image_index];
     }
-    frame_attachment_views_.clear();
-    frame_attachment_views_.reserve(swapchain_.color_attachments.size());
-    for (const auto& [name, usage, aspect, samples, initial_layout, image] : swapchain_.color_attachments) {
-        frame_attachment_views_.push_back(context::AttachmentView{.name = name, .image = image.image, .view = image.imageView, .format = image.imageFormat, .extent = image.imageExtent, .samples = samples, .usage = usage, .aspect = aspect, .current_layout = initial_layout});
+    this->frame_attachment_views_.clear();
+    this->frame_attachment_views_.reserve(this->swapchain_.color_attachments.size());
+    for (const auto& [name, usage, aspect, samples, initial_layout, image] : this->swapchain_.color_attachments) {
+        this->frame_attachment_views_.push_back(context::AttachmentView{.name = name, .image = image.image, .view = image.imageView, .format = image.imageFormat, .extent = image.imageExtent, .samples = samples, .usage = usage, .aspect = aspect, .current_layout = initial_layout});
     }
-    frm.color_attachments = frame_attachment_views_;
-    if (!frame_attachment_views_.empty()) {
-        frm.offscreen_image      = frame_attachment_views_.front().image;
-        frm.offscreen_image_view = frame_attachment_views_.front().view;
+    frm.color_attachments = this->frame_attachment_views_;
+    if (!this->frame_attachment_views_.empty()) {
+        frm.offscreen_image      = this->frame_attachment_views_.front().image;
+        frm.offscreen_image_view = this->frame_attachment_views_.front().view;
     } else {
         frm.offscreen_image      = VK_NULL_HANDLE;
         frm.offscreen_image_view = VK_NULL_HANDLE;
     }
-    if (swapchain_.depth_attachment) {
-        depth_attachment_view_ = context::AttachmentView{.name = swapchain_.depth_attachment->name,
-            .image                                             = swapchain_.depth_attachment->image.image,
-            .view                                              = swapchain_.depth_attachment->image.imageView,
-            .format                                            = swapchain_.depth_attachment->image.imageFormat,
-            .extent                                            = swapchain_.depth_attachment->image.imageExtent,
-            .samples                                           = swapchain_.depth_attachment->samples,
-            .usage                                             = swapchain_.depth_attachment->usage,
-            .aspect                                            = swapchain_.depth_attachment->aspect,
-            .current_layout                                    = swapchain_.depth_attachment->initial_layout};
-        frm.depth_attachment   = &depth_attachment_view_;
-        frm.depth_image        = depth_attachment_view_.image;
-        frm.depth_image_view   = depth_attachment_view_.view;
+    if (this->swapchain_.depth_attachment) {
+        this->depth_attachment_view_ = context::AttachmentView{.name = this->swapchain_.depth_attachment->name,
+            .image                                             = this->swapchain_.depth_attachment->image.image,
+            .view                                              = this->swapchain_.depth_attachment->image.imageView,
+            .format                                            = this->swapchain_.depth_attachment->image.imageFormat,
+            .extent                                            = this->swapchain_.depth_attachment->image.imageExtent,
+            .samples                                           = this->swapchain_.depth_attachment->samples,
+            .usage                                             = this->swapchain_.depth_attachment->usage,
+            .aspect                                            = this->swapchain_.depth_attachment->aspect,
+            .current_layout                                    = this->swapchain_.depth_attachment->initial_layout};
+        frm.depth_attachment   = &this->depth_attachment_view_;
+        frm.depth_image        = this->depth_attachment_view_.image;
+        frm.depth_image_view   = this->depth_attachment_view_.view;
     } else {
         frm.depth_attachment = nullptr;
         frm.depth_image      = VK_NULL_HANDLE;
         frm.depth_image_view = VK_NULL_HANDLE;
     }
-    frm.presentation_mode = renderer_caps_.presentation_mode;
+    frm.presentation_mode = this->renderer_caps_.presentation_mode;
     return frm;
 }
