@@ -234,6 +234,7 @@ public:
             }
         }
         ImGui::End();
+        camera_->draw_mini_axis_gizmo();
     }
 
     static void on_present(vk::context::PluginContext&) {}

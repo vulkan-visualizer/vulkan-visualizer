@@ -12,7 +12,6 @@ import vk.context;
 import vk.toolkit.imgui;
 
 namespace vk::engine {
-    // Plugin concept - no interfaces, pure concept-based design
     export template <typename T>
     concept CPlugin = requires(T plugin, context::PluginContext& ctx, const SDL_Event& event, uint32_t w, uint32_t h) {
         { plugin.phases() } -> std::convertible_to<context::PluginPhase>;
@@ -88,11 +87,10 @@ namespace vk::engine {
     };
 
     void VulkanEngine::init(CPlugin auto&... plugins) {
-        // Phase 1: Setup - Collect capabilities from all plugins
         context::PluginContext ctx{&ctx_, nullptr, &renderer_caps_, nullptr, nullptr, 0, 0.0f};
         (
             [&] {
-                if ((plugins.phases() & context::PluginPhase::Setup)) {
+                if (plugins.phases() & context::PluginPhase::Setup) {
                     plugins.on_setup(ctx);
                 }
             }(),
@@ -111,7 +109,6 @@ namespace vk::engine {
             toolkit::imgui::destroy_imgui();
         });
 
-        // Phase 2: Initialize - Create plugin resources
         ctx.frame = new context::FrameContext(make_frame_context(state_.frame_number, 0u, swapchain_.swapchain_extent));
         (
             [&] {
@@ -162,7 +159,6 @@ namespace vk::engine {
                 default: break;
                 }
 
-                // Dispatch events to plugins
                 ([&] { plugins.on_event(e); }(), ...);
                 ImGui_ImplSDL3_ProcessEvent(&e);
             }
@@ -176,7 +172,6 @@ namespace vk::engine {
 
             if (!state_.should_rendering) continue;
 
-            // Begin frame
             uint32_t image_index = 0;
             VkCommandBuffer cmd  = VK_NULL_HANDLE;
             this->begin_frame(image_index, cmd);
@@ -186,9 +181,16 @@ namespace vk::engine {
             context::FrameData& frData   = frames_[state_.frame_number % context::FRAME_OVERLAP];
             frData.asyncComputeSubmitted = false;
 
-            context::PluginContext plugin_ctx{&ctx_, &frm, &renderer_caps_, &cmd, nullptr, state_.frame_number, state_.dt_sec};
+            context::PluginContext plugin_ctx{
+                .engine       = &ctx_,
+                .frame        = &frm,
+                .caps         = &renderer_caps_,
+                .cmd          = &cmd,
+                .event        = &e,
+                .frame_number = state_.frame_number,
+                .delta_time   = state_.dt_sec,
+            };
 
-            // Phase: PreRender (update logic, prepare data)
             (
                 [&] {
                     if ((plugins.phases() & context::PluginPhase::PreRender)) {
@@ -197,7 +199,6 @@ namespace vk::engine {
                 }(),
                 ...);
 
-            // Phase: Render (graphics commands)
             (
                 [&] {
                     if ((plugins.phases() & context::PluginPhase::Render)) {
@@ -206,7 +207,6 @@ namespace vk::engine {
                 }(),
                 ...);
 
-            // Phase: PostRender (UI, overlays)
             (
                 [&] {
                     if ((plugins.phases() & context::PluginPhase::PostRender)) {
@@ -225,7 +225,6 @@ namespace vk::engine {
                 ...);
             toolkit::imgui::end_imgui_frame(cmd, frm);
 
-            // Handle presentation mode
             switch (renderer_caps_.presentation_mode) {
             case context::PresentationMode::EngineBlit: this->blit_offscreen_to_swapchain(image_index, cmd, frm.extent); break;
             case context::PresentationMode::RendererComposite:
@@ -233,7 +232,6 @@ namespace vk::engine {
             default: break;
             }
 
-            // Phase: Present (post-processing before present)
             (
                 [&] {
                     if ((plugins.phases() & context::PluginPhase::Present)) {
@@ -243,7 +241,6 @@ namespace vk::engine {
                 ...);
 
             end_frame(image_index, cmd);
-
 
             state_.frame_number++;
         }
