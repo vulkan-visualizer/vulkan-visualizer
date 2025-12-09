@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(vulkan_visualizer VERSION 1.1.0 LANGUAGES CXX)
+project(vulkan_visualizer VERSION 1.1.1 LANGUAGES CXX)
 
 option(VK_VISUALIZER_BUILD_TESTS "Build the Vulkan Visualizer tests" OFF)
 
