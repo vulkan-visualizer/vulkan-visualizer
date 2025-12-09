@@ -156,7 +156,7 @@ if (TARGET SDL3-shared)
 elseif (TARGET SDL3::SDL3)
     target_link_libraries(vk_vis PUBLIC $<BUILD_INTERFACE:SDL3::SDL3>)
 endif ()
-target_include_directories(vk_vis PRIVATE
+target_include_directories(vk_vis PUBLIC
         $<BUILD_INTERFACE:${sdl3_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${vk_bootstrap_SOURCE_DIR}/src>
         $<BUILD_INTERFACE:${vma_src_SOURCE_DIR}/include>
