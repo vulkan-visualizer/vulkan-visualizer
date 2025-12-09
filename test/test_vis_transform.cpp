@@ -7,6 +7,7 @@ import vk.engine;
 import vk.context;
 import vk.toolkit.camera;
 import vk.toolkit.geometry;
+import vk.toolkit.vulkan;
 
 namespace vk::plugins {
     class TransformViewer {
@@ -28,17 +29,51 @@ namespace vk::plugins {
         void on_pre_render(context::PluginContext& ctx) const {
             camera_->update(ctx.delta_time, ctx.frame->extent.width, ctx.frame->extent.height);
         }
-        static void on_render(context::PluginContext& ctx) {}
+        static void on_render(context::PluginContext& ctx) {
+            constexpr VkClearValue clear_value{.color = {{0.f, 0.f, 0.f, 1.f}}};
+            const auto& target = ctx.frame->color_attachments.front();
+            toolkit::vulkan::transition_image_layout(*ctx.cmd, target, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+            const VkRenderingAttachmentInfo color_attachment{
+                .sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                .imageView   = target.view,
+                .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .loadOp      = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                .storeOp     = VK_ATTACHMENT_STORE_OP_STORE,
+                .clearValue  = clear_value,
+            };
+            const VkRenderingInfo render_info{
+                .sType                = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                .renderArea           = {{0, 0}, ctx.frame->extent},
+                .layerCount           = 1,
+                .colorAttachmentCount = 1,
+                .pColorAttachments    = &color_attachment,
+            };
+            vkCmdBeginRendering(*ctx.cmd, &render_info);
+
+            vkCmdEndRendering(*ctx.cmd);
+            toolkit::vulkan::transition_image_layout(*ctx.cmd, target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
+        }
         static void on_post_render(context::PluginContext& ctx) {}
         void on_imgui(context::PluginContext& ctx) const {
-            camera_->draw_mini_axis_gizmo();
+            // FPS inspector overlay in top-left corner
+            ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always);
+            ImGui::SetNextWindowBgAlpha(0.35f); // Transparent background
+            ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove;
+
+            if (ImGui::Begin("##FPSOverlay", nullptr, window_flags)) {
+                ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+                ImGui::Text("Frame Time: %.3f ms", 1000.0f / ImGui::GetIO().Framerate);
+            }
+            ImGui::End();
+
+            this->camera_->draw_mini_axis_gizmo();
         }
         static void on_present(context::PluginContext&) {}
         static void on_cleanup(context::PluginContext& ctx) {}
         void on_event(const SDL_Event& event) const {
             const auto& io = ImGui::GetIO();
             if (const bool imgui_wants_input = io.WantCaptureMouse || io.WantCaptureKeyboard; !imgui_wants_input) {
-                camera_->handle_event(event);
+                this->camera_->handle_event(event);
             }
         }
         static void on_resize(uint32_t width, uint32_t height) {}
