@@ -82,7 +82,7 @@ namespace vk::plugins {
         VmaAllocation all_grid_instance_allocation_{};
         VmaAllocation density_color_allocation_{};
 
-        VisualizationMode viz_mode_{VisualizationMode::WireframeGrid};
+        VisualizationMode viz_mode_{VisualizationMode::SolidCubes};
         bool show_panel_{true};
 
         uint32_t vertex_count_{0};
