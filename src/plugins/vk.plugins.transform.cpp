@@ -66,9 +66,9 @@ void vk::plugins::TransformViewer::on_initialize(context::PluginContext& ctx) {
     constexpr float frustum_far  = std::max(0.32f, average_radius_ * 0.12f);
 
     std::vector<toolkit::geometry::Vertex> vertices;
-    append_lines(vertices, toolkit::geometry::make_frustum_lines(this->poses_, frustum_near, frustum_far, 45.0f));
+    append_lines(vertices, toolkit::geometry::make_frustum_lines(this->poses_, frustum_near, frustum_far, 30.0f));
     append_lines(vertices, toolkit::geometry::make_axis_lines(this->poses_, std::max(0.2f, average_radius_ * 0.08f)));
-    append_lines(vertices, toolkit::geometry::make_path_lines(this->poses_, {0.7f, 0.72f, 0.78f}));
+    // append_lines(vertices, toolkit::geometry::make_path_lines(this->poses_, {0.7f, 0.72f, 0.78f}));
     this->mesh_buffer_ = create_vertex_buffer(*ctx.engine, vertices);
 
     this->create_pipeline(*ctx.engine, ctx.frame->color_attachments.front().format);
