@@ -93,4 +93,24 @@ namespace vk::toolkit::math {
     export Vec3 extract_position(const Mat4& m) {
         return Vec3{m.m[12], m.m[13], m.m[14]};
     }
+
+    // clang-format off
+    export Mat4 blender_to_vulkan(const Mat4& m) {
+        constexpr Mat4 C = {
+            1,  0,  0,  0,
+            0,  0, -1,  0,
+            0,  1,  0,  0,
+            0,  0,  0,  1
+        };
+
+        constexpr Mat4 C_inv = {
+            1,  0,  0,  0,
+            0,  0,  1,  0,
+            0, -1,  0,  0,
+            0,  0,  0,  1
+        };
+
+        return C * m * C_inv;
+    }
+    // clang-format on
 } // namespace vk::toolkit::math
