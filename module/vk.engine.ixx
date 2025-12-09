@@ -70,6 +70,7 @@ namespace vk::engine {
             bool minimized{false};
             bool focused{true};
             uint64_t frame_number{0};
+            uint64_t max_frame_number{0};
             float time_sec{0.0};
             float dt_sec{0.0};
         } state_;
@@ -133,7 +134,6 @@ namespace vk::engine {
 
         SDL_Event e{};
         while (state_.running) {
-            // Event processing
             while (SDL_PollEvent(&e)) {
                 switch (e.type) {
                 case SDL_EVENT_QUIT:
@@ -193,7 +193,7 @@ namespace vk::engine {
 
             (
                 [&] {
-                    if ((plugins.phases() & context::PluginPhase::PreRender)) {
+                    if (plugins.phases() & context::PluginPhase::PreRender) {
                         plugins.on_pre_render(plugin_ctx);
                     }
                 }(),
@@ -201,7 +201,7 @@ namespace vk::engine {
 
             (
                 [&] {
-                    if ((plugins.phases() & context::PluginPhase::Render)) {
+                    if (plugins.phases() & context::PluginPhase::Render) {
                         plugins.on_render(plugin_ctx);
                     }
                 }(),
@@ -209,7 +209,7 @@ namespace vk::engine {
 
             (
                 [&] {
-                    if ((plugins.phases() & context::PluginPhase::PostRender)) {
+                    if (plugins.phases() & context::PluginPhase::PostRender) {
                         plugins.on_post_render(plugin_ctx);
                     }
                 }(),
@@ -218,7 +218,7 @@ namespace vk::engine {
             toolkit::imgui::begin_imgui_frame();
             (
                 [&] {
-                    if ((plugins.phases() & context::PluginPhase::ImGUI)) {
+                    if (plugins.phases() & context::PluginPhase::ImGUI) {
                         plugins.on_imgui(plugin_ctx);
                     }
                 }(),
@@ -243,6 +243,8 @@ namespace vk::engine {
             end_frame(image_index, cmd);
 
             state_.frame_number++;
+
+            if (state_.max_frame_number != 0 && state_.frame_number >= state_.max_frame_number) state_.running = false;
         }
     }
     void VulkanEngine::cleanup() {
