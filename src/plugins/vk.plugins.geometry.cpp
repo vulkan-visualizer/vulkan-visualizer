@@ -3,12 +3,9 @@ module;
 #include <backends/imgui_impl_vulkan.h>
 #include <chrono>
 #include <cmath>
-#include <fstream>
 #include <imgui.h>
-#include <print>
 #include <ranges>
 #include <stdexcept>
-#include <string>
 #include <vector>
 #include <vk_mem_alloc.h>
 #include <vulkan/vulkan.h>
@@ -16,25 +13,10 @@ module vk.plugins.geometry;
 import vk.context;
 import vk.toolkit.log;
 import vk.toolkit.vulkan;
-
-namespace {
-    void create_buffer_with_data(const vk::context::EngineContext& eng, const void* data, VkDeviceSize size, VkBufferUsageFlags usage, VkBuffer& buffer, VmaAllocation& allocation) {
-        const VkBufferCreateInfo buffer_ci{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size, .usage = usage, .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
-
-        constexpr VmaAllocationCreateInfo alloc_ci{.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT, .usage = VMA_MEMORY_USAGE_AUTO, .requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT};
-
-        VmaAllocationInfo alloc_info{};
-        vk::toolkit::log::vk_check(vmaCreateBuffer(eng.allocator, &buffer_ci, &alloc_ci, &buffer, &allocation, &alloc_info), "Failed to create geometry buffer");
-
-        void* mapped = nullptr;
-        vmaMapMemory(eng.allocator, allocation, &mapped);
-        std::memcpy(mapped, data, size);
-        vmaUnmapMemory(eng.allocator, allocation);
-    }
-} // namespace
+import vk.toolkit.geometry;
 
 vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_sphere_mesh(const context::EngineContext& eng, uint32_t segments, std::vector<float>* out_vertices, std::vector<uint32_t>* out_indices) {
-    auto [VERTICES_SPHERE, INDICES_SPHERE] = SPHERE_GEOMETRY<32>();
+    auto [VERTICES_SPHERE, INDICES_SPHERE] = toolkit::geometry::SPHERE_GEOMETRY<32>();
 
     GeometryMesh mesh;
     mesh.vertex_count = static_cast<uint32_t>(VERTICES_SPHERE.size() / 6);
@@ -44,13 +26,13 @@ vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_sphere_mesh(const co
     if (out_vertices) *out_vertices = std::vector<float>(VERTICES_SPHERE.begin(), VERTICES_SPHERE.end());
     if (out_indices) *out_indices = std::vector<uint32_t>(INDICES_SPHERE.begin(), INDICES_SPHERE.end());
 
-    create_buffer_with_data(eng, VERTICES_SPHERE.data(), VERTICES_SPHERE.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
-    create_buffer_with_data(eng, INDICES_SPHERE.data(), INDICES_SPHERE.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, VERTICES_SPHERE.data(), VERTICES_SPHERE.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, INDICES_SPHERE.data(), INDICES_SPHERE.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
 
     return mesh;
 }
 vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_box_mesh(const context::EngineContext& eng, std::vector<float>* out_vertices, std::vector<uint32_t>* out_indices) {
-    auto [VERTICES_BOX, INDICES_BOX] = BOX_GEOMETRY<1.0f, 1.0f, 1.0f>();
+    auto [VERTICES_BOX, INDICES_BOX] = toolkit::geometry::BOX_GEOMETRY<1.0f, 1.0f, 1.0f>();
 
     GeometryMesh mesh;
     mesh.vertex_count = 24;
@@ -64,13 +46,13 @@ vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_box_mesh(const conte
         out_indices->assign(std::begin(INDICES_BOX), std::end(INDICES_BOX));
     }
 
-    create_buffer_with_data(eng, VERTICES_BOX.data(), sizeof(VERTICES_BOX), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
-    create_buffer_with_data(eng, INDICES_BOX.data(), sizeof(INDICES_BOX), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, VERTICES_BOX.data(), sizeof(VERTICES_BOX), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, INDICES_BOX.data(), sizeof(INDICES_BOX), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
 
     return mesh;
 }
 vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_cylinder_mesh(const context::EngineContext& eng, uint32_t segments, std::vector<float>* out_vertices, std::vector<uint32_t>* out_indices) {
-    auto [VERTICES_CYLINDER, INDICES_CYLINDER] = CYLINDER_GEOMETRY<32>();
+    auto [VERTICES_CYLINDER, INDICES_CYLINDER] = toolkit::geometry::CYLINDER_GEOMETRY<32>();
 
     GeometryMesh mesh;
     mesh.vertex_count = static_cast<uint32_t>(VERTICES_CYLINDER.size() / 6);
@@ -80,13 +62,13 @@ vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_cylinder_mesh(const 
     if (out_vertices) *out_vertices = std::vector<float>(VERTICES_CYLINDER.begin(), VERTICES_CYLINDER.end());
     if (out_indices) *out_indices = std::vector<uint32_t>(INDICES_CYLINDER.begin(), INDICES_CYLINDER.end());
 
-    create_buffer_with_data(eng, VERTICES_CYLINDER.data(), VERTICES_CYLINDER.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
-    create_buffer_with_data(eng, INDICES_CYLINDER.data(), INDICES_CYLINDER.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, VERTICES_CYLINDER.data(), VERTICES_CYLINDER.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, INDICES_CYLINDER.data(), INDICES_CYLINDER.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
 
     return mesh;
 }
 vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_cone_mesh(const context::EngineContext& eng, uint32_t segments, std::vector<float>* out_vertices, std::vector<uint32_t>* out_indices) {
-    auto [VERTICES_CONE, INDICES_CONE] = CONE_GEOMETRY<32>();
+    auto [VERTICES_CONE, INDICES_CONE] = toolkit::geometry::CONE_GEOMETRY<32>();
 
     GeometryMesh mesh;
     mesh.vertex_count = static_cast<uint32_t>(VERTICES_CONE.size() / 6);
@@ -96,13 +78,13 @@ vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_cone_mesh(const cont
     if (out_vertices) *out_vertices = std::vector<float>(VERTICES_CONE.begin(), VERTICES_CONE.end());
     if (out_indices) *out_indices = std::vector<uint32_t>(INDICES_CONE.begin(), INDICES_CONE.end());
 
-    create_buffer_with_data(eng, VERTICES_CONE.data(), VERTICES_CONE.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
-    create_buffer_with_data(eng, INDICES_CONE.data(), INDICES_CONE.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, VERTICES_CONE.data(), VERTICES_CONE.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, INDICES_CONE.data(), INDICES_CONE.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
 
     return mesh;
 }
 vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_torus_mesh(const context::EngineContext& eng, uint32_t segments, uint32_t tube_segments, std::vector<float>* out_vertices, std::vector<uint32_t>* out_indices) {
-    auto [VERTICES_TORUS, INDICES_TORUS] = TORUS_GEOMETRY<32, 16>();
+    auto [VERTICES_TORUS, INDICES_TORUS] = toolkit::geometry::TORUS_GEOMETRY<32, 16>();
 
     GeometryMesh mesh;
     mesh.vertex_count = static_cast<uint32_t>(VERTICES_TORUS.size() / 6);
@@ -112,13 +94,13 @@ vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_torus_mesh(const con
     if (out_vertices) *out_vertices = std::vector<float>(VERTICES_TORUS.begin(), VERTICES_TORUS.end());
     if (out_indices) *out_indices = std::vector<uint32_t>(INDICES_TORUS.begin(), INDICES_TORUS.end());
 
-    create_buffer_with_data(eng, VERTICES_TORUS.data(), VERTICES_TORUS.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
-    create_buffer_with_data(eng, INDICES_TORUS.data(), INDICES_TORUS.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, VERTICES_TORUS.data(), VERTICES_TORUS.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, INDICES_TORUS.data(), INDICES_TORUS.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
 
     return mesh;
 }
 vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_capsule_mesh(const context::EngineContext& eng, uint32_t segments, std::vector<float>* out_vertices, std::vector<uint32_t>* out_indices) {
-    auto [VERTICES_CAPSULE, INDICES_CAPSULE] = CAPSULE_GEOMETRY<16>();
+    auto [VERTICES_CAPSULE, INDICES_CAPSULE] = toolkit::geometry::CAPSULE_GEOMETRY<16>();
 
     GeometryMesh mesh;
     mesh.vertex_count = static_cast<uint32_t>(VERTICES_CAPSULE.size() / 6);
@@ -128,13 +110,13 @@ vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_capsule_mesh(const c
     if (out_vertices) *out_vertices = std::vector<float>(VERTICES_CAPSULE.begin(), VERTICES_CAPSULE.end());
     if (out_indices) *out_indices = std::vector<uint32_t>(INDICES_CAPSULE.begin(), INDICES_CAPSULE.end());
 
-    create_buffer_with_data(eng, VERTICES_CAPSULE.data(), VERTICES_CAPSULE.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
-    create_buffer_with_data(eng, INDICES_CAPSULE.data(), INDICES_CAPSULE.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, VERTICES_CAPSULE.data(), VERTICES_CAPSULE.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, INDICES_CAPSULE.data(), INDICES_CAPSULE.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
 
     return mesh;
 }
 vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_plane_mesh(const context::EngineContext& eng, std::vector<float>* out_vertices, std::vector<uint32_t>* out_indices) {
-    auto [VERTICES_PLANE, INDICES_PLANE] = PLANE_GEOMETRY();
+    auto [VERTICES_PLANE, INDICES_PLANE] = toolkit::geometry::PLANE_GEOMETRY();
 
     GeometryMesh mesh;
     mesh.vertex_count = 4;
@@ -148,8 +130,8 @@ vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_plane_mesh(const con
         out_indices->assign(std::begin(INDICES_PLANE), std::end(INDICES_PLANE));
     }
 
-    create_buffer_with_data(eng, VERTICES_PLANE.data(), sizeof(VERTICES_PLANE), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
-    create_buffer_with_data(eng, INDICES_PLANE.data(), sizeof(INDICES_PLANE), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, VERTICES_PLANE.data(), sizeof(VERTICES_PLANE), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, INDICES_PLANE.data(), sizeof(INDICES_PLANE), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
 
     return mesh;
 }
@@ -194,8 +176,8 @@ vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_circle_mesh(const co
     if (out_vertices) *out_vertices = vertices;
     if (out_indices) *out_indices = indices;
 
-    create_buffer_with_data(eng, vertices.data(), vertices.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
-    create_buffer_with_data(eng, indices.data(), indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, vertices.data(), vertices.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, indices.data(), indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
 
     return mesh;
 }
@@ -215,8 +197,8 @@ vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_line_mesh(const cont
     mesh.index_count  = 2;
     mesh.topology     = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
 
-    create_buffer_with_data(eng, vertices, sizeof(vertices), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
-    create_buffer_with_data(eng, indices, sizeof(indices), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, vertices, sizeof(vertices), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, indices, sizeof(indices), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
 
     return mesh;
 }
@@ -287,8 +269,8 @@ vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_face_normal_mesh(con
     mesh.index_count  = static_cast<uint32_t>(line_indices.size());
     mesh.topology     = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
 
-    create_buffer_with_data(eng, line_vertices.data(), line_vertices.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
-    create_buffer_with_data(eng, line_indices.data(), line_indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, line_vertices.data(), line_vertices.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
+    toolkit::vulkan::create_buffer_with_data(eng, line_indices.data(), line_indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
 
     return mesh;
 }
