@@ -1,6 +1,8 @@
 #include <SDL3/SDL.h>
 #include <imgui.h>
+#include <numbers>
 #include <print>
+#include <span>
 #include <vector>
 #include <vulkan/vulkan.h>
 import vk.engine;
@@ -8,8 +10,63 @@ import vk.context;
 import vk.toolkit.camera;
 import vk.toolkit.geometry;
 import vk.toolkit.vulkan;
+import vk.toolkit.math;
+import vk.toolkit.log;
 
 namespace vk::plugins {
+    void append_lines(std::vector<toolkit::geometry::Vertex>& out, const std::vector<toolkit::geometry::ColoredLine>& lines) {
+        out.reserve(out.size() + lines.size() * 2);
+        for (const auto& l : lines) {
+            out.push_back(toolkit::geometry::Vertex{l.a, l.color});
+            out.push_back(toolkit::geometry::Vertex{l.b, l.color});
+        }
+    }
+
+    struct MeshBuffer {
+        VkBuffer buffer{VK_NULL_HANDLE};
+        VkDeviceMemory memory{VK_NULL_HANDLE};
+        uint32_t vertex_count{0};
+    };
+
+
+    MeshBuffer create_vertex_buffer(const context::EngineContext& eng, std::span<const toolkit::geometry::Vertex> vertices) {
+        MeshBuffer mb{};
+        if (vertices.empty()) return mb;
+
+        const VkDeviceSize size = static_cast<VkDeviceSize>(vertices.size() * sizeof(toolkit::geometry::Vertex));
+
+        const VkBufferCreateInfo buffer_ci{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size, .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
+
+        toolkit::log::vk_check(vkCreateBuffer(eng.device, &buffer_ci, nullptr, &mb.buffer), "Failed to create vertex buffer");
+
+        VkMemoryRequirements mem_req{};
+        vkGetBufferMemoryRequirements(eng.device, mb.buffer, &mem_req);
+
+        auto find_memory_type = [&](uint32_t type_bits, VkMemoryPropertyFlags properties) -> uint32_t {
+            VkPhysicalDeviceMemoryProperties mem_props{};
+            vkGetPhysicalDeviceMemoryProperties(eng.physical, &mem_props);
+            for (uint32_t i = 0; i < mem_props.memoryTypeCount; ++i) {
+                if ((type_bits & (1u << i)) && (mem_props.memoryTypes[i].propertyFlags & properties) == properties) {
+                    return i;
+                }
+            }
+            throw std::runtime_error("Failed to find suitable memory type");
+        };
+
+        const VkMemoryAllocateInfo alloc_info{.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mem_req.size, .memoryTypeIndex = find_memory_type(mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
+
+        toolkit::log::vk_check(vkAllocateMemory(eng.device, &alloc_info, nullptr, &mb.memory), "Failed to allocate vertex buffer memory");
+        toolkit::log::vk_check(vkBindBufferMemory(eng.device, mb.buffer, mb.memory, 0), "Failed to bind vertex buffer memory");
+
+        void* mapped = nullptr;
+        toolkit::log::vk_check(vkMapMemory(eng.device, mb.memory, 0, size, 0, &mapped), "Failed to map vertex buffer memory");
+        std::memcpy(mapped, vertices.data(), static_cast<size_t>(size));
+        vkUnmapMemory(eng.device, mb.memory);
+
+        mb.vertex_count = static_cast<uint32_t>(vertices.size());
+        return mb;
+    }
+
     class TransformViewer {
     public:
         [[nodiscard]] static constexpr context::PluginPhase phases() noexcept {
@@ -25,11 +82,23 @@ namespace vk::plugins {
             ctx.caps->color_attachments       = {context::AttachmentRequest{.name = "color", .format = VK_FORMAT_B8G8R8A8_UNORM, .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, .samples = VK_SAMPLE_COUNT_1_BIT, .aspect = VK_IMAGE_ASPECT_COLOR_BIT, .initial_layout = VK_IMAGE_LAYOUT_GENERAL}};
             ctx.caps->presentation_attachment = "color";
         }
-        static void on_initialize(context::PluginContext& ctx) {}
+        void on_initialize(context::PluginContext& ctx) {
+            constexpr float average_radius_{4.0f};
+            constexpr float frustum_near = std::max(0.12f, average_radius_ * 0.06f);
+            constexpr float frustum_far  = std::max(0.32f, average_radius_ * 0.12f);
+
+            std::vector<toolkit::geometry::Vertex> vertices;
+            append_lines(vertices, toolkit::geometry::make_frustum_lines(this->poses_, frustum_near, frustum_far, 45.0f));
+            append_lines(vertices, toolkit::geometry::make_axis_lines(this->poses_, std::max(0.2f, average_radius_ * 0.08f)));
+            append_lines(vertices, toolkit::geometry::make_path_lines(this->poses_, {0.7f, 0.72f, 0.78f}));
+            this->mesh_buffer_ = create_vertex_buffer(*ctx.engine, vertices);
+
+            this->create_pipeline(*ctx.engine, ctx.frame->color_attachments.front().format);
+        }
         void on_pre_render(context::PluginContext& ctx) const {
             camera_->update(ctx.delta_time, ctx.frame->extent.width, ctx.frame->extent.height);
         }
-        static void on_render(context::PluginContext& ctx) {
+        void on_render(context::PluginContext& ctx) {
             constexpr VkClearValue clear_value{.color = {{0.f, 0.f, 0.f, 1.f}}};
             const auto& target = ctx.frame->color_attachments.front();
             toolkit::vulkan::transition_image_layout(*ctx.cmd, target, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
@@ -50,6 +119,22 @@ namespace vk::plugins {
             };
             vkCmdBeginRendering(*ctx.cmd, &render_info);
 
+
+            const VkViewport viewport{.x = 0.0f, .y = 0.0f, .width = static_cast<float>(ctx.frame->extent.width), .height = static_cast<float>(ctx.frame->extent.height), .minDepth = 0.0f, .maxDepth = 1.0f};
+            const VkRect2D scissor{{0, 0}, ctx.frame->extent};
+            vkCmdSetViewport(*ctx.cmd, 0, 1, &viewport);
+            vkCmdSetScissor(*ctx.cmd, 0, 1, &scissor);
+            vkCmdSetLineWidth(*ctx.cmd, 1.6f);
+
+            vkCmdBindPipeline(*ctx.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, this->pipeline_);
+            constexpr VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(*ctx.cmd, 0, 1, &this->mesh_buffer_.buffer, offsets);
+
+            const auto mvp = this->camera_->proj_matrix() * this->camera_->view_matrix();
+            vkCmdPushConstants(*ctx.cmd, this->pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float) * 16, mvp.m.data());
+
+            vkCmdDraw(*ctx.cmd, this->mesh_buffer_.vertex_count, 1, 0, 0);
+
             vkCmdEndRendering(*ctx.cmd);
             toolkit::vulkan::transition_image_layout(*ctx.cmd, target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
         }
@@ -69,7 +154,19 @@ namespace vk::plugins {
             this->camera_->draw_mini_axis_gizmo();
         }
         static void on_present(context::PluginContext&) {}
-        static void on_cleanup(context::PluginContext& ctx) {}
+        void on_cleanup(context::PluginContext& ctx) {
+            if (ctx.engine) {
+                vkDeviceWaitIdle(ctx.engine->device);
+                if (mesh_buffer_.buffer != VK_NULL_HANDLE) {
+                    vkDestroyBuffer(ctx.engine->device, mesh_buffer_.buffer, nullptr);
+                }
+                if (mesh_buffer_.memory != VK_NULL_HANDLE) {
+                    vkFreeMemory(ctx.engine->device, mesh_buffer_.memory, nullptr);
+                }
+                mesh_buffer_ = {};
+                destroy_pipeline(*ctx.engine);
+            }
+        }
         void on_event(const SDL_Event& event) const {
             const auto& io = ImGui::GetIO();
             if (const bool imgui_wants_input = io.WantCaptureMouse || io.WantCaptureKeyboard; !imgui_wants_input) {
@@ -78,7 +175,7 @@ namespace vk::plugins {
         }
         static void on_resize(uint32_t width, uint32_t height) {}
 
-        explicit TransformViewer(std::shared_ptr<toolkit::camera::Camera> camera) : camera_(std::move(camera)) {}
+        explicit TransformViewer(std::shared_ptr<toolkit::camera::Camera> camera, std::vector<toolkit::math::Mat4> poses) : camera_(std::move(camera)), poses_(std::move(poses)) {}
         ~TransformViewer()                                     = default;
         TransformViewer(const TransformViewer&)                = delete;
         TransformViewer& operator=(const TransformViewer&)     = delete;
@@ -86,7 +183,63 @@ namespace vk::plugins {
         TransformViewer& operator=(TransformViewer&&) noexcept = default;
 
     protected:
-        void create_pipeline(const context::EngineContext& eng, VkFormat color_format) {}
+        void create_pipeline(const context::EngineContext& eng, VkFormat color_format) {
+            const auto vert_module = vk::toolkit::vulkan::load_shader("test_camera_transform.vert.spv", eng.device);
+            const auto frag_module = vk::toolkit::vulkan::load_shader("test_camera_transform.frag.spv", eng.device);
+
+            const VkPushConstantRange push_constant{.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0, .size = sizeof(float) * 16};
+            const VkPipelineLayoutCreateInfo layout_info{.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .pushConstantRangeCount = 1, .pPushConstantRanges = &push_constant};
+            vk::toolkit::log::vk_check(vkCreatePipelineLayout(eng.device, &layout_info, nullptr, &pipeline_layout_), "Failed to create pipeline layout");
+
+            const VkPipelineShaderStageCreateInfo vert_stage{.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = vert_module, .pName = "main"};
+            const VkPipelineShaderStageCreateInfo frag_stage{.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = frag_module, .pName = "main"};
+            const VkPipelineShaderStageCreateInfo stages[] = {vert_stage, frag_stage};
+
+            const VkVertexInputBindingDescription binding{.binding = 0, .stride = sizeof(vk::toolkit::geometry::Vertex), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX};
+            const VkVertexInputAttributeDescription attributes[] = {
+                {.location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(vk::toolkit::geometry::Vertex, pos)},
+                {.location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(vk::toolkit::geometry::Vertex, color)},
+            };
+
+            const VkPipelineVertexInputStateCreateInfo vertex_input{.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO, .vertexBindingDescriptionCount = 1, .pVertexBindingDescriptions = &binding, .vertexAttributeDescriptionCount = 2, .pVertexAttributeDescriptions = attributes};
+
+            const VkPipelineInputAssemblyStateCreateInfo input_assembly{.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, .topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST};
+
+            const VkPipelineViewportStateCreateInfo viewport_state{.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1, .scissorCount = 1};
+
+            const VkPipelineRasterizationStateCreateInfo rasterizer{.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO, .polygonMode = VK_POLYGON_MODE_FILL, .cullMode = VK_CULL_MODE_NONE, .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE, .lineWidth = 1.5f};
+
+            const VkPipelineMultisampleStateCreateInfo msaa{.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
+
+            const VkPipelineColorBlendAttachmentState color_blend_attachment{.blendEnable = VK_FALSE, .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT};
+            const VkPipelineColorBlendStateCreateInfo color_blend{.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, .attachmentCount = 1, .pAttachments = &color_blend_attachment};
+
+            const VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_LINE_WIDTH};
+            const VkPipelineDynamicStateCreateInfo dynamic_state{.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = 3, .pDynamicStates = dynamic_states};
+
+            VkPipelineRenderingCreateInfo rendering_info{.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO, .colorAttachmentCount = 1, .pColorAttachmentFormats = &color_format};
+
+            const VkGraphicsPipelineCreateInfo pipeline_info{.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+                .pNext                                              = &rendering_info,
+                .stageCount                                         = 2,
+                .pStages                                            = stages,
+                .pVertexInputState                                  = &vertex_input,
+                .pInputAssemblyState                                = &input_assembly,
+                .pViewportState                                     = &viewport_state,
+                .pRasterizationState                                = &rasterizer,
+                .pMultisampleState                                  = &msaa,
+                .pDepthStencilState                                 = nullptr,
+                .pColorBlendState                                   = &color_blend,
+                .pDynamicState                                      = &dynamic_state,
+                .layout                                             = pipeline_layout_,
+                .renderPass                                         = VK_NULL_HANDLE,
+                .subpass                                            = 0};
+
+            vk::toolkit::log::vk_check(vkCreateGraphicsPipelines(eng.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline_), "Failed to create frustum pipeline");
+
+            vkDestroyShaderModule(eng.device, vert_module, nullptr);
+            vkDestroyShaderModule(eng.device, frag_module, nullptr);
+        }
         void destroy_pipeline(const context::EngineContext& eng) {
             if (pipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(eng.device, pipeline_, nullptr);
             if (pipeline_layout_ != VK_NULL_HANDLE) vkDestroyPipelineLayout(eng.device, pipeline_layout_, nullptr);
@@ -96,24 +249,38 @@ namespace vk::plugins {
 
     private:
         std::shared_ptr<toolkit::camera::Camera> camera_{};
+        std::vector<toolkit::math::Mat4> poses_{};
 
-        struct MeshBuffer {
-            VkBuffer buffer{VK_NULL_HANDLE};
-            VkDeviceMemory memory{VK_NULL_HANDLE};
-            uint32_t vertex_count{0};
-        } mesh_buffer_{};
+        MeshBuffer mesh_buffer_{};
         VkPipelineLayout pipeline_layout_{VK_NULL_HANDLE};
         VkPipeline pipeline_{VK_NULL_HANDLE};
-
-        std::vector<toolkit::geometry::ColoredLine> frustum_lines_{};
-        std::vector<toolkit::geometry::ColoredLine> axis_lines_{};
-        std::vector<toolkit::geometry::ColoredLine> path_lines_{};
     };
 } // namespace vk::plugins
 
 int main() {
     vk::engine::VulkanEngine engine;
-    vk::plugins::TransformViewer viewer(std::make_shared<vk::toolkit::camera::Camera>());
+
+    constexpr std::size_t count = 28;
+    std::vector<vk::toolkit::math::Mat4> poses;
+    poses.reserve(count);
+
+    constexpr vk::toolkit::math::Vec3 target{0.0f, 0.0f, 0.0f};
+    constexpr float two_pi = 2.0f * std::numbers::pi_v<float>;
+
+    for (std::size_t i = 0; i < count; ++i) {
+        constexpr float height_variation = 0.6f;
+        constexpr float radius           = 4.0f;
+        const float t                    = static_cast<float>(i) / static_cast<float>(count);
+        const float theta                = t * two_pi;
+        const float wobble               = std::sin(theta * 3.0f) * 0.25f;
+        const float distance             = radius * (0.8f + 0.15f * std::cos(theta * 0.5f));
+        const float height               = height_variation * std::cos(theta * 1.5f) + wobble * 0.35f;
+
+        const vk::toolkit::math::Vec3 position{distance * std::cos(theta), height, distance * std::sin(theta)};
+        poses.push_back(vk::toolkit::geometry::build_pose(position, target, vk::toolkit::math::Vec3{0.0f, 1.0f, 0.0f}));
+    }
+
+    vk::plugins::TransformViewer viewer(std::make_shared<vk::toolkit::camera::Camera>(), poses);
 
     engine.init(viewer);
     engine.run(viewer);

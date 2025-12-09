@@ -118,4 +118,19 @@ namespace vk::toolkit::geometry {
 
         return {center, average_radius};
     }
+
+    export std::vector<ColoredLine> make_path_lines(const std::vector<math::Mat4>& poses, const math::Vec3 color) {
+        std::vector<ColoredLine> lines;
+        lines.reserve(poses.size());
+        if (poses.size() < 2) return lines;
+
+        math::Vec3 prev = extract_position(poses.front());
+        for (std::size_t i = 1; i < poses.size(); ++i) {
+            const math::Vec3 curr = extract_position(poses[i]);
+            lines.push_back(ColoredLine{prev, curr, color});
+            prev = curr;
+        }
+        lines.push_back(ColoredLine{prev, extract_position(poses.front()), color});
+        return lines;
+    }
 } // namespace vk::toolkit::geometry
