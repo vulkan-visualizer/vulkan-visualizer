@@ -34,106 +34,23 @@ namespace {
 } // namespace
 
 vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_sphere_mesh(const context::EngineContext& eng, uint32_t segments, std::vector<float>* out_vertices, std::vector<uint32_t>* out_indices) {
-    std::vector<float> vertices;
-    std::vector<uint32_t> indices;
-
-    const auto rings   = segments;
-    const auto sectors = segments * 2;
-
-    // Generate vertices
-    for (uint32_t r = 0; r <= rings; ++r) {
-        const auto phi = static_cast<float>(r) / static_cast<float>(rings) * 3.14159265359f;
-        for (uint32_t s = 0; s <= sectors; ++s) {
-            const auto theta = static_cast<float>(s) / static_cast<float>(sectors) * 2.0f * 3.14159265359f;
-
-            const auto x = std::sin(phi) * std::cos(theta);
-            const auto y = std::cos(phi);
-            const auto z = std::sin(phi) * std::sin(theta);
-
-            vertices.push_back(x);
-            vertices.push_back(y);
-            vertices.push_back(z); // position
-            vertices.push_back(x);
-            vertices.push_back(y);
-            vertices.push_back(z); // normal
-        }
-    }
-
-    // Generate indices (CCW from outside)
-    for (uint32_t r = 0; r < rings; ++r) {
-        for (uint32_t s = 0; s < sectors; ++s) {
-            const auto current = r * (sectors + 1) + s;
-            const auto next    = current + sectors + 1;
-
-            // Reversed winding
-            indices.push_back(current);
-            indices.push_back(current + 1);
-            indices.push_back(next);
-
-            indices.push_back(current + 1);
-            indices.push_back(next + 1);
-            indices.push_back(next);
-        }
-    }
+    auto [VERTICES_SPHERE, INDICES_SPHERE] = SPHERE_GEOMETRY<32>();
 
     GeometryMesh mesh;
-    mesh.vertex_count = static_cast<uint32_t>(vertices.size() / 6);
-    mesh.index_count  = static_cast<uint32_t>(indices.size());
+    mesh.vertex_count = static_cast<uint32_t>(VERTICES_SPHERE.size() / 6);
+    mesh.index_count  = static_cast<uint32_t>(INDICES_SPHERE.size());
     mesh.topology     = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
-    if (out_vertices) *out_vertices = vertices;
-    if (out_indices) *out_indices = indices;
+    if (out_vertices) *out_vertices = std::vector<float>(VERTICES_SPHERE.begin(), VERTICES_SPHERE.end());
+    if (out_indices) *out_indices = std::vector<uint32_t>(INDICES_SPHERE.begin(), INDICES_SPHERE.end());
 
-    create_buffer_with_data(eng, vertices.data(), vertices.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
-    create_buffer_with_data(eng, indices.data(), indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
+    create_buffer_with_data(eng, VERTICES_SPHERE.data(), VERTICES_SPHERE.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
+    create_buffer_with_data(eng, INDICES_SPHERE.data(), INDICES_SPHERE.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
 
     return mesh;
 }
 vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_box_mesh(const context::EngineContext& eng, std::vector<float>* out_vertices, std::vector<uint32_t>* out_indices) {
-    // clang-format off
-    constexpr float vertices[] = {
-        // positions          // normals
-        // Front
-        -0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
-         0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
-         0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
-        -0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
-        // Back
-        -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
-        -0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
-         0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
-         0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
-        // Top
-        -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,
-        -0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
-         0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
-         0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,
-        // Bottom
-        -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
-         0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
-         0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
-        -0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
-        // Right
-         0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
-         0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
-         0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
-         0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
-        // Left
-        -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
-        -0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
-        -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
-        -0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
-    };
-    // clang-format on
-
-    constexpr uint32_t indices[] = {
-        0, 1, 2, 2, 3, 0, // front
-        4, 5, 6, 6, 7, 4, // back
-        8, 9, 10, 10, 11, 8, // top
-        12, 13, 14, 14, 15, 12, // bottom
-        16, 17, 18, 18, 19, 16, // right
-        20, 21, 22, 22, 23, 20 // left
-    };
+    auto [VERTICES_BOX, INDICES_BOX] = BOX_GEOMETRY<1.0f, 1.0f, 1.0f>();
 
     GeometryMesh mesh;
     mesh.vertex_count = 24;
@@ -141,420 +58,83 @@ vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_box_mesh(const conte
     mesh.topology     = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
     if (out_vertices) {
-        out_vertices->assign(std::begin(vertices), std::end(vertices));
+        out_vertices->assign(std::begin(VERTICES_BOX), std::end(VERTICES_BOX));
     }
     if (out_indices) {
-        out_indices->assign(std::begin(indices), std::end(indices));
+        out_indices->assign(std::begin(INDICES_BOX), std::end(INDICES_BOX));
     }
 
-    create_buffer_with_data(eng, vertices, sizeof(vertices), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
-    create_buffer_with_data(eng, indices, sizeof(indices), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
+    create_buffer_with_data(eng, VERTICES_BOX.data(), sizeof(VERTICES_BOX), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
+    create_buffer_with_data(eng, INDICES_BOX.data(), sizeof(INDICES_BOX), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
 
     return mesh;
 }
 vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_cylinder_mesh(const context::EngineContext& eng, uint32_t segments, std::vector<float>* out_vertices, std::vector<uint32_t>* out_indices) {
-    std::vector<float> vertices;
-    std::vector<uint32_t> indices;
-
-    // Generate side vertices (with radial normals)
-    for (uint32_t i = 0; i <= segments; ++i) {
-        const auto angle = static_cast<float>(i) / static_cast<float>(segments) * 2.0f * 3.14159265359f;
-        const auto x     = std::cos(angle);
-        const auto z     = std::sin(angle);
-
-        // Bottom vertex
-        vertices.push_back(x);
-        vertices.push_back(-0.5f);
-        vertices.push_back(z);
-        vertices.push_back(x);
-        vertices.push_back(0.0f);
-        vertices.push_back(z); // radial normal
-
-        // Top vertex
-        vertices.push_back(x);
-        vertices.push_back(0.5f);
-        vertices.push_back(z);
-        vertices.push_back(x);
-        vertices.push_back(0.0f);
-        vertices.push_back(z); // radial normal
-    }
-
-    const auto side_vertex_count = static_cast<uint32_t>(vertices.size() / 6);
-
-    // Generate side indices (CCW from outside)
-    for (uint32_t i = 0; i < segments; ++i) {
-        const auto base = i * 2;
-        // Reversed winding for correct CCW from outside
-        indices.push_back(base); // bottom current
-        indices.push_back(base + 1); // top current
-        indices.push_back(base + 2); // bottom next
-
-        indices.push_back(base + 2); // bottom next
-        indices.push_back(base + 1); // top current
-        indices.push_back(base + 3); // top next
-    }
-
-    // Add bottom cap center vertex
-    const auto bottom_center_idx = side_vertex_count;
-    vertices.push_back(0.0f);
-    vertices.push_back(-0.5f);
-    vertices.push_back(0.0f);
-    vertices.push_back(0.0f);
-    vertices.push_back(-1.0f);
-    vertices.push_back(0.0f); // down normal
-
-    // Add bottom cap ring vertices
-    for (uint32_t i = 0; i <= segments; ++i) {
-        const auto angle = static_cast<float>(i) / static_cast<float>(segments) * 2.0f * 3.14159265359f;
-        const auto x     = std::cos(angle);
-        const auto z     = std::sin(angle);
-        vertices.push_back(x);
-        vertices.push_back(-0.5f);
-        vertices.push_back(z);
-        vertices.push_back(0.0f);
-        vertices.push_back(-1.0f);
-        vertices.push_back(0.0f); // down normal
-    }
-
-    // Generate bottom cap indices (CCW from outside = CW when viewed from below)
-    for (uint32_t i = 0; i < segments; ++i) {
-        indices.push_back(bottom_center_idx);
-        indices.push_back(bottom_center_idx + i + 1);
-        indices.push_back(bottom_center_idx + i + 2);
-    }
-
-    // Add top cap center vertex
-    const auto top_center_idx = static_cast<uint32_t>(vertices.size() / 6);
-    vertices.push_back(0.0f);
-    vertices.push_back(0.5f);
-    vertices.push_back(0.0f);
-    vertices.push_back(0.0f);
-    vertices.push_back(1.0f);
-    vertices.push_back(0.0f); // up normal
-
-    // Add top cap ring vertices
-    for (uint32_t i = 0; i <= segments; ++i) {
-        const auto angle = static_cast<float>(i) / static_cast<float>(segments) * 2.0f * 3.14159265359f;
-        const auto x     = std::cos(angle);
-        const auto z     = std::sin(angle);
-        vertices.push_back(x);
-        vertices.push_back(0.5f);
-        vertices.push_back(z);
-        vertices.push_back(0.0f);
-        vertices.push_back(1.0f);
-        vertices.push_back(0.0f); // up normal
-    }
-
-    // Generate top cap indices (CCW from outside)
-    for (uint32_t i = 0; i < segments; ++i) {
-        indices.push_back(top_center_idx);
-        indices.push_back(top_center_idx + i + 2);
-        indices.push_back(top_center_idx + i + 1);
-    }
+    auto [VERTICES_CYLINDER, INDICES_CYLINDER] = CYLINDER_GEOMETRY<32>();
 
     GeometryMesh mesh;
-    mesh.vertex_count = static_cast<uint32_t>(vertices.size() / 6);
-    mesh.index_count  = static_cast<uint32_t>(indices.size());
+    mesh.vertex_count = static_cast<uint32_t>(VERTICES_CYLINDER.size() / 6);
+    mesh.index_count  = static_cast<uint32_t>(INDICES_CYLINDER.size());
     mesh.topology     = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
-    if (out_vertices) *out_vertices = vertices;
-    if (out_indices) *out_indices = indices;
+    if (out_vertices) *out_vertices = std::vector<float>(VERTICES_CYLINDER.begin(), VERTICES_CYLINDER.end());
+    if (out_indices) *out_indices = std::vector<uint32_t>(INDICES_CYLINDER.begin(), INDICES_CYLINDER.end());
 
-    create_buffer_with_data(eng, vertices.data(), vertices.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
-    create_buffer_with_data(eng, indices.data(), indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
+    create_buffer_with_data(eng, VERTICES_CYLINDER.data(), VERTICES_CYLINDER.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
+    create_buffer_with_data(eng, INDICES_CYLINDER.data(), INDICES_CYLINDER.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
 
     return mesh;
 }
 vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_cone_mesh(const context::EngineContext& eng, uint32_t segments, std::vector<float>* out_vertices, std::vector<uint32_t>* out_indices) {
-    std::vector<float> vertices;
-    std::vector<uint32_t> indices;
-
-    // Apex
-    vertices.push_back(0.0f);
-    vertices.push_back(0.5f);
-    vertices.push_back(0.0f);
-    vertices.push_back(0.0f);
-    vertices.push_back(1.0f);
-    vertices.push_back(0.0f);
-
-    // Side vertices (base circle with radial normals)
-    for (uint32_t i = 0; i <= segments; ++i) {
-        const auto angle = static_cast<float>(i) / static_cast<float>(segments) * 2.0f * 3.14159265359f;
-        const auto x     = std::cos(angle);
-        const auto z     = std::sin(angle);
-
-        // Calculate cone side normal (pointing outward and upward)
-        const auto ny = 0.707f; // 45 degree slope
-        const auto nr = 0.707f;
-        vertices.push_back(x);
-        vertices.push_back(-0.5f);
-        vertices.push_back(z);
-        vertices.push_back(x * nr);
-        vertices.push_back(ny);
-        vertices.push_back(z * nr);
-    }
-
-    // Generate side indices (CCW from outside)
-    for (uint32_t i = 0; i < segments; ++i) {
-        indices.push_back(0); // apex
-        indices.push_back(i + 2); // next base vertex
-        indices.push_back(i + 1); // current base vertex
-    }
-
-    // Add base cap center
-    const auto base_center_idx = static_cast<uint32_t>(vertices.size() / 6);
-    vertices.push_back(0.0f);
-    vertices.push_back(-0.5f);
-    vertices.push_back(0.0f);
-    vertices.push_back(0.0f);
-    vertices.push_back(-1.0f);
-    vertices.push_back(0.0f);
-
-    // Add base cap ring (with downward normals)
-    for (uint32_t i = 0; i <= segments; ++i) {
-        const auto angle = static_cast<float>(i) / static_cast<float>(segments) * 2.0f * 3.14159265359f;
-        const auto x     = std::cos(angle);
-        const auto z     = std::sin(angle);
-        vertices.push_back(x);
-        vertices.push_back(-0.5f);
-        vertices.push_back(z);
-        vertices.push_back(0.0f);
-        vertices.push_back(-1.0f);
-        vertices.push_back(0.0f);
-    }
-
-    // Generate base cap indices (CCW from outside)
-    for (uint32_t i = 0; i < segments; ++i) {
-        indices.push_back(base_center_idx);
-        indices.push_back(base_center_idx + i + 1);
-        indices.push_back(base_center_idx + i + 2);
-    }
+    auto [VERTICES_CONE, INDICES_CONE] = CONE_GEOMETRY<32>();
 
     GeometryMesh mesh;
-    mesh.vertex_count = static_cast<uint32_t>(vertices.size() / 6);
-    mesh.index_count  = static_cast<uint32_t>(indices.size());
+    mesh.vertex_count = static_cast<uint32_t>(VERTICES_CONE.size() / 6);
+    mesh.index_count  = static_cast<uint32_t>(INDICES_CONE.size());
     mesh.topology     = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
-    if (out_vertices) *out_vertices = vertices;
-    if (out_indices) *out_indices = indices;
+    if (out_vertices) *out_vertices = std::vector<float>(VERTICES_CONE.begin(), VERTICES_CONE.end());
+    if (out_indices) *out_indices = std::vector<uint32_t>(INDICES_CONE.begin(), INDICES_CONE.end());
 
-    create_buffer_with_data(eng, vertices.data(), vertices.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
-    create_buffer_with_data(eng, indices.data(), indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
+    create_buffer_with_data(eng, VERTICES_CONE.data(), VERTICES_CONE.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
+    create_buffer_with_data(eng, INDICES_CONE.data(), INDICES_CONE.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
 
     return mesh;
 }
 vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_torus_mesh(const context::EngineContext& eng, uint32_t segments, uint32_t tube_segments, std::vector<float>* out_vertices, std::vector<uint32_t>* out_indices) {
-    std::vector<float> vertices;
-    std::vector<uint32_t> indices;
-
-    constexpr auto major_radius = 0.4f;
-    constexpr auto minor_radius = 0.15f;
-
-    for (uint32_t i = 0; i <= segments; ++i) {
-        const auto u = static_cast<float>(i) / static_cast<float>(segments) * 2.0f * 3.14159265359f;
-        for (uint32_t j = 0; j <= tube_segments; ++j) {
-            const auto v = static_cast<float>(j) / static_cast<float>(tube_segments) * 2.0f * 3.14159265359f;
-
-            const auto x = (major_radius + minor_radius * std::cos(v)) * std::cos(u);
-            const auto y = minor_radius * std::sin(v);
-            const auto z = (major_radius + minor_radius * std::cos(v)) * std::sin(u);
-
-            const auto nx = std::cos(v) * std::cos(u);
-            const auto ny = std::sin(v);
-            const auto nz = std::cos(v) * std::sin(u);
-
-            vertices.push_back(x);
-            vertices.push_back(y);
-            vertices.push_back(z);
-            vertices.push_back(nx);
-            vertices.push_back(ny);
-            vertices.push_back(nz);
-        }
-    }
-
-    for (uint32_t i = 0; i < segments; ++i) {
-        for (uint32_t j = 0; j < tube_segments; ++j) {
-            const auto a = i * (tube_segments + 1) + j;
-            const auto b = a + tube_segments + 1;
-
-            // Reversed winding
-            indices.push_back(a);
-            indices.push_back(a + 1);
-            indices.push_back(b);
-
-            indices.push_back(a + 1);
-            indices.push_back(b + 1);
-            indices.push_back(b);
-        }
-    }
+    auto [VERTICES_TORUS, INDICES_TORUS] = TORUS_GEOMETRY<32, 16>();
 
     GeometryMesh mesh;
-    mesh.vertex_count = static_cast<uint32_t>(vertices.size() / 6);
-    mesh.index_count  = static_cast<uint32_t>(indices.size());
+    mesh.vertex_count = static_cast<uint32_t>(VERTICES_TORUS.size() / 6);
+    mesh.index_count  = static_cast<uint32_t>(INDICES_TORUS.size());
     mesh.topology     = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
-    if (out_vertices) *out_vertices = vertices;
-    if (out_indices) *out_indices = indices;
+    if (out_vertices) *out_vertices = std::vector<float>(VERTICES_TORUS.begin(), VERTICES_TORUS.end());
+    if (out_indices) *out_indices = std::vector<uint32_t>(INDICES_TORUS.begin(), INDICES_TORUS.end());
 
-    create_buffer_with_data(eng, vertices.data(), vertices.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
-    create_buffer_with_data(eng, indices.data(), indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
+    create_buffer_with_data(eng, VERTICES_TORUS.data(), VERTICES_TORUS.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
+    create_buffer_with_data(eng, INDICES_TORUS.data(), INDICES_TORUS.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
 
     return mesh;
 }
 vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_capsule_mesh(const context::EngineContext& eng, uint32_t segments, std::vector<float>* out_vertices, std::vector<uint32_t>* out_indices) {
-    std::vector<float> vertices;
-    std::vector<uint32_t> indices;
-
-    constexpr auto height = 0.5f; // Half-height of cylinder section
-    constexpr auto radius = 0.25f;
-
-    // Top hemisphere
-    for (uint32_t r = 0; r <= segments / 2; ++r) {
-        const auto phi = static_cast<float>(r) / static_cast<float>(segments / 2) * 3.14159265359f * 0.5f;
-        for (uint32_t s = 0; s <= segments; ++s) {
-            const auto theta = static_cast<float>(s) / static_cast<float>(segments) * 2.0f * 3.14159265359f;
-
-            const auto x = radius * std::cos(phi) * std::cos(theta);
-            const auto y = height + radius * std::sin(phi);
-            const auto z = radius * std::cos(phi) * std::sin(theta);
-
-            const auto nx = std::cos(phi) * std::cos(theta);
-            const auto ny = std::sin(phi);
-            const auto nz = std::cos(phi) * std::sin(theta);
-
-            vertices.push_back(x);
-            vertices.push_back(y);
-            vertices.push_back(z);
-            vertices.push_back(nx);
-            vertices.push_back(ny);
-            vertices.push_back(nz);
-        }
-    }
-
-    const auto top_hemisphere_count = static_cast<uint32_t>(vertices.size() / 6);
-
-    // Generate top hemisphere indices
-    for (uint32_t r = 0; r < segments / 2; ++r) {
-        for (uint32_t s = 0; s < segments; ++s) {
-            const auto current = r * (segments + 1) + s;
-            const auto next    = current + segments + 1;
-
-            // Reversed winding
-            indices.push_back(current);
-            indices.push_back(next);
-            indices.push_back(current + 1);
-
-            indices.push_back(current + 1);
-            indices.push_back(next);
-            indices.push_back(next + 1);
-        }
-    }
-
-    // Cylinder middle section
-    const auto cylinder_start_idx = static_cast<uint32_t>(vertices.size() / 6);
-    for (uint32_t i = 0; i <= segments; ++i) {
-        const auto angle = static_cast<float>(i) / static_cast<float>(segments) * 2.0f * 3.14159265359f;
-        const auto x     = radius * std::cos(angle);
-        const auto z     = radius * std::sin(angle);
-        const auto nx    = std::cos(angle);
-        const auto nz    = std::sin(angle);
-
-        // Bottom of cylinder (at +height)
-        vertices.push_back(x);
-        vertices.push_back(height);
-        vertices.push_back(z);
-        vertices.push_back(nx);
-        vertices.push_back(0.0f);
-        vertices.push_back(nz);
-
-        // Top of cylinder (at -height)
-        vertices.push_back(x);
-        vertices.push_back(-height);
-        vertices.push_back(z);
-        vertices.push_back(nx);
-        vertices.push_back(0.0f);
-        vertices.push_back(nz);
-    }
-
-    // Generate cylinder indices
-    for (uint32_t i = 0; i < segments; ++i) {
-        const auto base = cylinder_start_idx + i * 2;
-        // Reversed winding
-        indices.push_back(base);
-        indices.push_back(base + 2);
-        indices.push_back(base + 1);
-
-        indices.push_back(base + 2);
-        indices.push_back(base + 3);
-        indices.push_back(base + 1);
-    }
-
-    // Bottom hemisphere
-    const auto bottom_hemisphere_start = static_cast<uint32_t>(vertices.size() / 6);
-    for (uint32_t r = 0; r <= segments / 2; ++r) {
-        const auto phi = static_cast<float>(r) / static_cast<float>(segments / 2) * 3.14159265359f * 0.5f;
-        for (uint32_t s = 0; s <= segments; ++s) {
-            const auto theta = static_cast<float>(s) / static_cast<float>(segments) * 2.0f * 3.14159265359f;
-
-            const auto x = radius * std::cos(phi) * std::cos(theta);
-            const auto y = -height - radius * std::sin(phi);
-            const auto z = radius * std::cos(phi) * std::sin(theta);
-
-            const auto nx = std::cos(phi) * std::cos(theta);
-            const auto ny = -std::sin(phi);
-            const auto nz = std::cos(phi) * std::sin(theta);
-
-            vertices.push_back(x);
-            vertices.push_back(y);
-            vertices.push_back(z);
-            vertices.push_back(nx);
-            vertices.push_back(ny);
-            vertices.push_back(nz);
-        }
-    }
-
-    // Generate bottom hemisphere indices
-    for (uint32_t r = 0; r < segments / 2; ++r) {
-        for (uint32_t s = 0; s < segments; ++s) {
-            const auto current = bottom_hemisphere_start + r * (segments + 1) + s;
-            const auto next    = current + segments + 1;
-
-            // Reversed winding
-            indices.push_back(current);
-            indices.push_back(current + 1);
-            indices.push_back(next);
-
-            indices.push_back(current + 1);
-            indices.push_back(next + 1);
-            indices.push_back(next);
-        }
-    }
+    auto [VERTICES_CAPSULE, INDICES_CAPSULE] = CAPSULE_GEOMETRY<16>();
 
     GeometryMesh mesh;
-    mesh.vertex_count = static_cast<uint32_t>(vertices.size() / 6);
-    mesh.index_count  = static_cast<uint32_t>(indices.size());
+    mesh.vertex_count = static_cast<uint32_t>(VERTICES_CAPSULE.size() / 6);
+    mesh.index_count  = static_cast<uint32_t>(INDICES_CAPSULE.size());
     mesh.topology     = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
-    if (out_vertices) *out_vertices = vertices;
-    if (out_indices) *out_indices = indices;
+    if (out_vertices) *out_vertices = std::vector<float>(VERTICES_CAPSULE.begin(), VERTICES_CAPSULE.end());
+    if (out_indices) *out_indices = std::vector<uint32_t>(INDICES_CAPSULE.begin(), INDICES_CAPSULE.end());
 
-    create_buffer_with_data(eng, vertices.data(), vertices.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
-    create_buffer_with_data(eng, indices.data(), indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
+    create_buffer_with_data(eng, VERTICES_CAPSULE.data(), VERTICES_CAPSULE.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
+    create_buffer_with_data(eng, INDICES_CAPSULE.data(), INDICES_CAPSULE.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
 
     return mesh;
 }
 vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_plane_mesh(const context::EngineContext& eng, std::vector<float>* out_vertices, std::vector<uint32_t>* out_indices) {
-    // clang-format off
-    constexpr float vertices[] = {
-        // positions           // normals
-        -0.5f, 0.0f, -0.5f,    0.0f, 1.0f, 0.0f, // vertex 0
-         0.5f, 0.0f, -0.5f,    0.0f, 1.0f, 0.0f, // vertex 1
-         0.5f, 0.0f,  0.5f,    0.0f, 1.0f, 0.0f, // vertex 2
-        -0.5f, 0.0f,  0.5f,    0.0f, 1.0f, 0.0f, // vertex 3
-    };
-    // clang-format on
-
-    constexpr uint32_t indices[] = {0, 2, 1, 2, 0, 3};
+    auto [VERTICES_PLANE, INDICES_PLANE] = PLANE_GEOMETRY();
 
     GeometryMesh mesh;
     mesh.vertex_count = 4;
@@ -562,14 +142,14 @@ vk::plugins::GeometryMesh vk::plugins::GeometryMesh::create_plane_mesh(const con
     mesh.topology     = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
     if (out_vertices) {
-        out_vertices->assign(std::begin(vertices), std::end(vertices));
+        out_vertices->assign(std::begin(VERTICES_PLANE), std::end(VERTICES_PLANE));
     }
     if (out_indices) {
-        out_indices->assign(std::begin(indices), std::end(indices));
+        out_indices->assign(std::begin(INDICES_PLANE), std::end(INDICES_PLANE));
     }
 
-    create_buffer_with_data(eng, vertices, sizeof(vertices), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
-    create_buffer_with_data(eng, indices, sizeof(indices), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
+    create_buffer_with_data(eng, VERTICES_PLANE.data(), sizeof(VERTICES_PLANE), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertex_buffer, mesh.vertex_allocation);
+    create_buffer_with_data(eng, INDICES_PLANE.data(), sizeof(INDICES_PLANE), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.index_buffer, mesh.index_allocation);
 
     return mesh;
 }

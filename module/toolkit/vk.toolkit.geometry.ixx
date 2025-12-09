@@ -1,6 +1,8 @@
 module;
 #include <cmath>
 #include <numbers>
+#include <span>
+#include <stdexcept>
 #include <vector>
 export module vk.toolkit.geometry;
 import vk.toolkit.math;
@@ -132,5 +134,123 @@ namespace vk::toolkit::geometry {
         }
         lines.push_back(ColoredLine{prev, extract_position(poses.front()), color});
         return lines;
+    }
+
+    export class BitmapView {
+    public:
+        constexpr BitmapView() = default;
+        constexpr BitmapView(const int res_x, const int res_y, const int res_z, const std::span<const std::byte> bytes) noexcept : res_x_(res_x), res_y_(res_y), res_z_(res_z), bytes_(bytes) {}
+
+        [[nodiscard]] constexpr bool get(int x, int y, int z) const noexcept {
+            const int idx = x + y * res_x_ + z * res_x_ * res_y_;
+            const auto b  = std::to_integer<unsigned>(bytes_[idx >> 3]);
+            return (b >> (idx & 0x7)) & 1u;
+        }
+
+        [[nodiscard]] constexpr int res_x() const noexcept {
+            return res_x_;
+        }
+        [[nodiscard]] constexpr int res_y() const noexcept {
+            return res_y_;
+        }
+        [[nodiscard]] constexpr int res_z() const noexcept {
+            return res_z_;
+        }
+
+        [[nodiscard]] constexpr std::span<const std::byte> bytes() const noexcept {
+            return bytes_;
+        }
+
+    private:
+        int res_x_{};
+        int res_y_{};
+        int res_z_{};
+        std::span<const std::byte> bytes_{};
+    };
+
+    export template <int RES_X, int RES_Y, int RES_Z>
+    class Bitmap {
+    public:
+        static_assert(RES_X > 0 && RES_Y > 0 && RES_Z > 0);
+
+        static constexpr int total_voxels = RES_X * RES_Y * RES_Z;
+        static constexpr int byte_count   = (total_voxels + 7) / 8;
+
+        constexpr Bitmap() = default;
+
+        constexpr explicit Bitmap(std::span<const unsigned char> src) {
+            // runtime check (size is not a constant expression)
+            if (src.size() != byte_count) {
+                throw std::runtime_error("Bitmap: size mismatch");
+            }
+
+            for (int i = 0; i < byte_count; ++i) {
+                data_[i] = std::byte{src[i]};
+            }
+        }
+
+        [[nodiscard]] constexpr std::span<std::byte> bytes() noexcept {
+            return data_;
+        }
+
+        [[nodiscard]] constexpr std::span<const std::byte> bytes() const noexcept {
+            return data_;
+        }
+
+        [[nodiscard]] constexpr bool get(int x, int y, int z) const noexcept {
+            const int idx = linear_index(x, y, z);
+            const auto b  = std::to_integer<unsigned>(data_[idx >> 3]);
+            return (b >> (idx & 0x7)) & 1u;
+        }
+
+        constexpr void set(int x, int y, int z) noexcept {
+            const int idx = linear_index(x, y, z);
+            data_[idx >> 3] |= bit_mask(idx);
+        }
+
+        [[nodiscard]] constexpr BitmapView view() const noexcept {
+            return BitmapView{RES_X, RES_Y, RES_Z, bytes()};
+        }
+
+    private:
+        std::array<std::byte, byte_count> data_{};
+
+        [[nodiscard]] static constexpr int linear_index(int x, int y, int z) noexcept {
+            return x + y * RES_X + z * RES_X * RES_Y;
+        }
+
+        [[nodiscard]] static constexpr std::byte bit_mask(int idx) noexcept {
+            return std::byte{static_cast<unsigned char>(1u << (idx & 0x7))};
+        }
+    };
+
+
+    template <int RES_X, int RES_Y, int RES_Z>
+    constexpr Bitmap<RES_X, RES_Y, RES_Z> make_centered_sphere(float radius_ratio) {
+        Bitmap<RES_X, RES_Y, RES_Z> bmp{};
+
+        const float cx = (RES_X - 1) * 0.5f;
+        const float cy = (RES_Y - 1) * 0.5f;
+        const float cz = (RES_Z - 1) * 0.5f;
+
+        const float r = radius_ratio * std::min({cx, cy, cz});
+
+        const float r2 = r * r;
+
+        for (int z = 0; z < RES_Z; ++z) {
+            const float dz = static_cast<float>(z) - cz;
+            for (int y = 0; y < RES_Y; ++y) {
+                const float dy = static_cast<float>(y) - cy;
+                for (int x = 0; x < RES_X; ++x) {
+                    const float dx = static_cast<float>(x) - cx;
+
+                    if (dx * dx + dy * dy + dz * dz <= r2) {
+                        bmp.set(x, y, z);
+                    }
+                }
+            }
+        }
+
+        return bmp;
     }
 } // namespace vk::toolkit::geometry

@@ -132,6 +132,7 @@ target_sources(vk_vis
         src/plugins/vk.plugins.screenshot.cpp
         src/plugins/vk.plugins.viewport3d.cpp
         src/plugins/vk.plugins.transform.cpp
+        src/plugins/vk.plugins.bitmap.cpp
         ${_VK_BOOTSTRAP_SOURCES}
         ${_VMA_IMPL}
         ${_STB_IMPL}
@@ -149,6 +150,7 @@ target_sources(vk_vis
         module/plugins/vk.plugins.screenshot.ixx
         module/plugins/vk.plugins.viewport3d.ixx
         module/plugins/vk.plugins.transform.ixx
+        module/plugins/vk.plugins.bitmap.ixx
 )
 target_link_libraries(vk_vis PUBLIC Vulkan::Vulkan)
 if (TARGET SDL3-shared)
