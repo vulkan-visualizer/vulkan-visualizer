@@ -7,6 +7,7 @@
 #include <vector>
 #include <vk_mem_alloc.h>
 #include <SDL3/SDL.h>
+#include <imgui.h>
 import vk.engine;
 import vk.context;
 import vk.plugins.viewport3d;
@@ -92,6 +93,7 @@ namespace {
             return vk::context::PluginPhase::Setup |
                    vk::context::PluginPhase::Initialize |
                    vk::context::PluginPhase::Render |
+                   vk::context::PluginPhase::ImGUI |
                    vk::context::PluginPhase::Cleanup;
         }
 
@@ -175,11 +177,11 @@ namespace {
 
             // Render based on selected mode
             switch (viz_mode_) {
-                case VisualizationMode::SolidCubes:
-                    render_solid_cubes(cmd, view_proj);
-                    break;
                 case VisualizationMode::WireframeGrid:
                     render_wireframe_grid(cmd, view_proj);
+                    break;
+                case VisualizationMode::SolidCubes:
+                    render_solid_cubes(cmd, view_proj);
                     break;
                 case VisualizationMode::Points:
                     render_points(cmd, view_proj);
@@ -196,7 +198,160 @@ namespace {
         }
 
         static void on_post_render(vk::context::PluginContext&) {}
-        static void on_imgui(vk::context::PluginContext&) {}
+
+        void on_imgui(vk::context::PluginContext&) {
+            if (!show_panel_) return;
+
+            ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize(ImVec2(400, 0), ImGuiCond_FirstUseEver);
+
+            if (ImGui::Begin("Occupancy Grid Visualizer", &show_panel_)) {
+                ImGui::Text("3D Occupancy Grid Visualization");
+                ImGui::Separator();
+
+                // Statistics section
+                if (ImGui::CollapsingHeader("Statistics", ImGuiTreeNodeFlags_DefaultOpen)) {
+                    ImGui::Text("Grid Size: %dx%dx%d", GRID_SIZE, GRID_SIZE, GRID_SIZE);
+                    ImGui::Text("Total Voxels: %d", TOTAL_VOXELS);
+                    ImGui::Text("Occupied Voxels: %zu", voxel_positions_.size());
+                    float occupancy_rate = (float)voxel_positions_.size() / TOTAL_VOXELS * 100.0f;
+                    ImGui::Text("Occupancy Rate: %.2f%%", occupancy_rate);
+                    ImGui::Text("Bitmap Size: %d bytes", BITMAP_SIZE);
+                    ImGui::Separator();
+                    ImGui::Text("Voxel Size: %.3f", VOXEL_SIZE);
+                    ImGui::Text("Grid Bounds: [%.2f, %.2f]", -GRID_CENTER, GRID_CENTER);
+                }
+
+                ImGui::Spacing();
+
+                // Visualization mode selection
+                if (ImGui::CollapsingHeader("Visualization Mode", ImGuiTreeNodeFlags_DefaultOpen)) {
+                    const char* mode_names[] = {
+                        "Wireframe Grid",
+                        "Solid Cubes",
+                        "Point Cloud",
+                        "Transparent Shell",
+                        "Density Colored"
+                    };
+
+                    int current_mode = static_cast<int>(viz_mode_);
+
+                    if (ImGui::RadioButton("Wireframe Grid", current_mode == 0)) {
+                        viz_mode_ = VisualizationMode::WireframeGrid;
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("Shows ALL voxels (occupied: bright cyan, empty: dim gray)\nBest for understanding grid structure");
+                    }
+
+                    if (ImGui::RadioButton("Solid Cubes", current_mode == 1)) {
+                        viz_mode_ = VisualizationMode::SolidCubes;
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("Filled cubes for occupied voxels only\nGood for dense visualization");
+                    }
+
+                    if (ImGui::RadioButton("Point Cloud", current_mode == 2)) {
+                        viz_mode_ = VisualizationMode::Points;
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("Fastest rendering - single point per voxel\nBest for performance and large grids");
+                    }
+
+                    if (ImGui::RadioButton("Transparent Shell", current_mode == 3)) {
+                        viz_mode_ = VisualizationMode::TransparentShell;
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("Semi-transparent cubes with alpha blending\nGood for seeing internal structure");
+                    }
+
+                    if (ImGui::RadioButton("Density Colored", current_mode == 4)) {
+                        viz_mode_ = VisualizationMode::DensityColored;
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("Colors based on local neighbor density\nBlue=sparse, Cyan=medium, Yellow=dense, Red=very dense");
+                    }
+
+                    ImGui::Spacing();
+                    ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Current: %s", mode_names[current_mode]);
+                }
+
+                ImGui::Spacing();
+
+                // Rendering info
+                if (ImGui::CollapsingHeader("Rendering Info")) {
+                    const char* render_info[] = {
+                        "All voxels with LINE_LIST topology",
+                        "Occupied voxels with TRIANGLE_LIST",
+                        "Occupied voxels with POINT_LIST",
+                        "Occupied voxels with alpha blending",
+                        "Occupied voxels with density colors"
+                    };
+                    int current_mode = static_cast<int>(viz_mode_);
+                    ImGui::BulletText("Topology: %s", render_info[current_mode]);
+
+                    size_t draw_count = (viz_mode_ == VisualizationMode::WireframeGrid)
+                        ? TOTAL_VOXELS : voxel_positions_.size();
+                    ImGui::BulletText("Instances: %zu", draw_count);
+                    ImGui::BulletText("Draw Calls: 1 (instanced)");
+                }
+
+                ImGui::Spacing();
+
+                // Controls help
+                if (ImGui::CollapsingHeader("Controls")) {
+                    ImGui::TextWrapped("Camera:");
+                    ImGui::BulletText("Left Mouse: Rotate (Orbit mode)");
+                    ImGui::BulletText("Right Mouse: Pan");
+                    ImGui::BulletText("Middle Mouse / Scroll: Zoom");
+                    ImGui::BulletText("Press H: Home view");
+                    ImGui::Spacing();
+                    ImGui::TextWrapped("Shortcuts:");
+                    ImGui::BulletText("1-5: Quick switch visualization modes");
+                    ImGui::BulletText("C: Toggle camera panel");
+                    ImGui::BulletText("G: Toggle this panel");
+                }
+
+                ImGui::Spacing();
+                ImGui::Separator();
+
+                // Color legend
+                if (ImGui::CollapsingHeader("Color Legend")) {
+                    if (viz_mode_ == VisualizationMode::WireframeGrid) {
+                        ImGui::ColorButton("##occupied", ImVec4(0.0f, 1.0f, 0.8f, 1.0f));
+                        ImGui::SameLine();
+                        ImGui::Text("Occupied Voxels");
+
+                        ImGui::ColorButton("##empty", ImVec4(0.15f, 0.15f, 0.2f, 1.0f));
+                        ImGui::SameLine();
+                        ImGui::Text("Empty Voxels");
+                    } else if (viz_mode_ == VisualizationMode::DensityColored) {
+                        ImGui::ColorButton("##blue", ImVec4(0.0f, 0.5f, 1.0f, 1.0f));
+                        ImGui::SameLine();
+                        ImGui::Text("Sparse (< 25%% density)");
+
+                        ImGui::ColorButton("##cyan", ImVec4(0.0f, 1.0f, 0.8f, 1.0f));
+                        ImGui::SameLine();
+                        ImGui::Text("Medium (25-50%% density)");
+
+                        ImGui::ColorButton("##yellow", ImVec4(1.0f, 1.0f, 0.0f, 1.0f));
+                        ImGui::SameLine();
+                        ImGui::Text("Dense (50-75%% density)");
+
+                        ImGui::ColorButton("##red", ImVec4(1.0f, 0.3f, 0.0f, 1.0f));
+                        ImGui::SameLine();
+                        ImGui::Text("Very Dense (> 75%% density)");
+                    } else {
+                        ImGui::TextWrapped("Position-based coloring for depth perception");
+                    }
+                }
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Press 'G' to toggle this panel");
+            }
+            ImGui::End();
+        }
+
         static void on_present(vk::context::PluginContext&) {}
 
         void on_cleanup(vk::context::PluginContext& ctx) {
@@ -215,7 +370,31 @@ namespace {
             if (density_color_buffer_ != VK_NULL_HANDLE) vmaDestroyBuffer(eng.allocator, density_color_buffer_, density_color_allocation_);
         }
 
-        static void on_event(const SDL_Event&) {}
+        void on_event(const SDL_Event& event) {
+            if (event.type == SDL_EVENT_KEY_DOWN) {
+                switch (event.key.key) {
+                    case SDLK_1:
+                        viz_mode_ = VisualizationMode::WireframeGrid;
+                        break;
+                    case SDLK_2:
+                        viz_mode_ = VisualizationMode::SolidCubes;
+                        break;
+                    case SDLK_3:
+                        viz_mode_ = VisualizationMode::Points;
+                        break;
+                    case SDLK_4:
+                        viz_mode_ = VisualizationMode::TransparentShell;
+                        break;
+                    case SDLK_5:
+                        viz_mode_ = VisualizationMode::DensityColored;
+                        break;
+                    case SDLK_G:
+                        show_panel_ = !show_panel_;
+                        break;
+                }
+            }
+        }
+
         void on_resize(uint32_t, uint32_t) {}
 
     private:
@@ -759,6 +938,7 @@ namespace {
 
         // Visualization state
         VisualizationMode viz_mode_{VisualizationMode::WireframeGrid};
+        bool show_panel_{true};
     };
 }
 
