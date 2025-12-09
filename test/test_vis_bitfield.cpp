@@ -54,9 +54,9 @@ namespace {
         for (int z = 0; z < GRID_SIZE; ++z) {
             for (int y = 0; y < GRID_SIZE; ++y) {
                 for (int x = 0; x < GRID_SIZE; ++x) {
-                    float dx = x - center;
-                    float dy = y - center;
-                    float dz = z - center;
+                    float dx = static_cast<float>(x) - center;
+                    float dy = static_cast<float>(y) - center;
+                    float dz = static_cast<float>(z) - center;
                     float dist_sq = dx * dx + dy * dy + dz * dz;
 
                     if (dist_sq <= radius_sq) {
@@ -69,6 +69,15 @@ namespace {
         return bitmap;
     }
 
+    // Visualization modes
+    enum class VisualizationMode {
+        WireframeGrid,       // Grid showing all cells with different colors (DEFAULT)
+        SolidCubes,          // Filled cubes for occupied voxels
+        Points,              // Point cloud of occupied voxels
+        TransparentShell,    // Semi-transparent occupied voxels with edges
+        DensityColored       // Color based on local density
+    };
+
     // Plugin for rendering occupancy grid
     class OccupancyGridRenderer {
     public:
@@ -76,6 +85,7 @@ namespace {
                                        const std::vector<uint8_t>& bitmap)
             : camera_(camera), bitmap_(bitmap) {
             extract_voxel_positions();
+            compute_density_colors();
         }
 
         [[nodiscard]] static constexpr vk::context::PluginPhase phases() noexcept {
@@ -99,8 +109,10 @@ namespace {
 
         void on_initialize(vk::context::PluginContext& ctx) {
             create_cube_mesh(ctx.engine);
+            create_grid_mesh(ctx.engine);
             create_instance_buffer(ctx.engine);
-            create_pipeline(ctx.engine, ctx.frame);
+            create_all_grid_instance_buffer(ctx.engine);
+            create_pipelines(ctx.engine, ctx.frame);
         }
 
         static void on_pre_render(vk::context::PluginContext&) {}
@@ -146,9 +158,6 @@ namespace {
 
             vkCmdBeginRendering(cmd, &render_info);
 
-            // Bind pipeline
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
-
             // Set viewport and scissor
             VkViewport viewport{};
             viewport.x = 0.0f;
@@ -164,18 +173,24 @@ namespace {
             scissor.extent = frame.extent;
             vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-            // Push constants
-            vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT,
-                             0, sizeof(vk::toolkit::math::Mat4), &view_proj);
-
-            // Bind vertex and index buffers
-            VkBuffer vertex_buffers[] = {vertex_buffer_, instance_buffer_};
-            VkDeviceSize offsets[] = {0, 0};
-            vkCmdBindVertexBuffers(cmd, 0, 2, vertex_buffers, offsets);
-            vkCmdBindIndexBuffer(cmd, index_buffer_, 0, VK_INDEX_TYPE_UINT32);
-
-            // Draw instanced
-            vkCmdDrawIndexed(cmd, index_count_, static_cast<uint32_t>(voxel_positions_.size()), 0, 0, 0);
+            // Render based on selected mode
+            switch (viz_mode_) {
+                case VisualizationMode::SolidCubes:
+                    render_solid_cubes(cmd, view_proj);
+                    break;
+                case VisualizationMode::WireframeGrid:
+                    render_wireframe_grid(cmd, view_proj);
+                    break;
+                case VisualizationMode::Points:
+                    render_points(cmd, view_proj);
+                    break;
+                case VisualizationMode::TransparentShell:
+                    render_transparent_shell(cmd, view_proj);
+                    break;
+                case VisualizationMode::DensityColored:
+                    render_density_colored(cmd, view_proj);
+                    break;
+            }
 
             vkCmdEndRendering(cmd);
         }
@@ -186,11 +201,18 @@ namespace {
 
         void on_cleanup(vk::context::PluginContext& ctx) {
             auto& eng = *ctx.engine;
-            if (pipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(eng.device, pipeline_, nullptr);
+            if (solid_pipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(eng.device, solid_pipeline_, nullptr);
+            if (wireframe_pipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(eng.device, wireframe_pipeline_, nullptr);
+            if (point_pipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(eng.device, point_pipeline_, nullptr);
+            if (transparent_pipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(eng.device, transparent_pipeline_, nullptr);
             if (pipeline_layout_ != VK_NULL_HANDLE) vkDestroyPipelineLayout(eng.device, pipeline_layout_, nullptr);
             if (vertex_buffer_ != VK_NULL_HANDLE) vmaDestroyBuffer(eng.allocator, vertex_buffer_, vertex_allocation_);
             if (index_buffer_ != VK_NULL_HANDLE) vmaDestroyBuffer(eng.allocator, index_buffer_, index_allocation_);
+            if (grid_vertex_buffer_ != VK_NULL_HANDLE) vmaDestroyBuffer(eng.allocator, grid_vertex_buffer_, grid_vertex_allocation_);
+            if (grid_index_buffer_ != VK_NULL_HANDLE) vmaDestroyBuffer(eng.allocator, grid_index_buffer_, grid_index_allocation_);
             if (instance_buffer_ != VK_NULL_HANDLE) vmaDestroyBuffer(eng.allocator, instance_buffer_, instance_allocation_);
+            if (all_grid_instance_buffer_ != VK_NULL_HANDLE) vmaDestroyBuffer(eng.allocator, all_grid_instance_buffer_, all_grid_instance_allocation_);
+            if (density_color_buffer_ != VK_NULL_HANDLE) vmaDestroyBuffer(eng.allocator, density_color_buffer_, density_color_allocation_);
         }
 
         static void on_event(const SDL_Event&) {}
@@ -203,15 +225,115 @@ namespace {
                     for (int x = 0; x < GRID_SIZE; ++x) {
                         if (is_occupied(bitmap_, x, y, z)) {
                             vk::toolkit::math::Vec3 pos{
-                                x * VOXEL_SIZE - GRID_CENTER,
-                                y * VOXEL_SIZE - GRID_CENTER,
-                                z * VOXEL_SIZE - GRID_CENTER
+                                static_cast<float>(x) * VOXEL_SIZE - GRID_CENTER,
+                                static_cast<float>(y) * VOXEL_SIZE - GRID_CENTER,
+                                static_cast<float>(z) * VOXEL_SIZE - GRID_CENTER
                             };
                             voxel_positions_.push_back(pos);
                         }
                     }
                 }
             }
+        }
+
+        void compute_density_colors() {
+            density_colors_.clear();
+            density_colors_.reserve(voxel_positions_.size());
+
+            for (int z = 0; z < GRID_SIZE; ++z) {
+                for (int y = 0; y < GRID_SIZE; ++y) {
+                    for (int x = 0; x < GRID_SIZE; ++x) {
+                        if (is_occupied(bitmap_, x, y, z)) {
+                            // Count neighbors (3x3x3 kernel)
+                            int neighbor_count = 0;
+                            for (int dz = -1; dz <= 1; ++dz) {
+                                for (int dy = -1; dy <= 1; ++dy) {
+                                    for (int dx = -1; dx <= 1; ++dx) {
+                                        int nx = x + dx, ny = y + dy, nz = z + dz;
+                                        if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE &&
+                                            nz >= 0 && nz < GRID_SIZE && is_occupied(bitmap_, nx, ny, nz)) {
+                                            neighbor_count++;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Color: blue (sparse) -> cyan -> green -> yellow -> red (dense)
+                            float density = neighbor_count / 27.0f;
+                            vk::toolkit::math::Vec3 color;
+                            if (density < 0.25f) {
+                                color = {0.0f, 0.5f, 1.0f}; // Blue
+                            } else if (density < 0.5f) {
+                                color = {0.0f, 1.0f, 0.8f}; // Cyan
+                            } else if (density < 0.75f) {
+                                color = {1.0f, 1.0f, 0.0f}; // Yellow
+                            } else {
+                                color = {1.0f, 0.3f, 0.0f}; // Red-Orange
+                            }
+                            density_colors_.push_back(color);
+                        }
+                    }
+                }
+            }
+        }
+
+        void render_solid_cubes(VkCommandBuffer cmd, const vk::toolkit::math::Mat4& view_proj) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, solid_pipeline_);
+            vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                             0, sizeof(vk::toolkit::math::Mat4), &view_proj);
+
+            VkBuffer vertex_buffers[] = {vertex_buffer_, instance_buffer_};
+            VkDeviceSize offsets[] = {0, 0};
+            vkCmdBindVertexBuffers(cmd, 0, 2, vertex_buffers, offsets);
+            vkCmdBindIndexBuffer(cmd, index_buffer_, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(cmd, index_count_, static_cast<uint32_t>(voxel_positions_.size()), 0, 0, 0);
+        }
+
+        void render_wireframe_grid(VkCommandBuffer cmd, const vk::toolkit::math::Mat4& view_proj) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, wireframe_pipeline_);
+            vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                             0, sizeof(vk::toolkit::math::Mat4), &view_proj);
+
+            VkBuffer vertex_buffers[] = {grid_vertex_buffer_, all_grid_instance_buffer_};
+            VkDeviceSize offsets[] = {0, 0};
+            vkCmdBindVertexBuffers(cmd, 0, 2, vertex_buffers, offsets);
+            vkCmdBindIndexBuffer(cmd, grid_index_buffer_, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(cmd, grid_index_count_, TOTAL_VOXELS, 0, 0, 0);
+        }
+
+        void render_points(VkCommandBuffer cmd, const vk::toolkit::math::Mat4& view_proj) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, point_pipeline_);
+            vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                             0, sizeof(vk::toolkit::math::Mat4), &view_proj);
+
+            VkBuffer vertex_buffers[] = {instance_buffer_};
+            VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(cmd, 0, 1, vertex_buffers, offsets);
+            vkCmdDraw(cmd, 1, static_cast<uint32_t>(voxel_positions_.size()), 0, 0);
+        }
+
+        void render_transparent_shell(VkCommandBuffer cmd, const vk::toolkit::math::Mat4& view_proj) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, transparent_pipeline_);
+            vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                             0, sizeof(vk::toolkit::math::Mat4), &view_proj);
+
+            VkBuffer vertex_buffers[] = {vertex_buffer_, instance_buffer_};
+            VkDeviceSize offsets[] = {0, 0};
+            vkCmdBindVertexBuffers(cmd, 0, 2, vertex_buffers, offsets);
+            vkCmdBindIndexBuffer(cmd, index_buffer_, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(cmd, index_count_, static_cast<uint32_t>(voxel_positions_.size()), 0, 0, 0);
+        }
+
+        void render_density_colored(VkCommandBuffer cmd, const vk::toolkit::math::Mat4& view_proj) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, solid_pipeline_);
+            vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                             0, sizeof(vk::toolkit::math::Mat4), &view_proj);
+
+            VkBuffer vertex_buffers[] = {vertex_buffer_, instance_buffer_, density_color_buffer_};
+            VkDeviceSize offsets[] = {0, 0, 0};
+            vkCmdBindVertexBuffers(cmd, 0, 3, vertex_buffers, offsets);
+            vkCmdBindIndexBuffer(cmd, index_buffer_, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(cmd, index_count_, static_cast<uint32_t>(voxel_positions_.size()), 0, 0, 0);
         }
 
         void create_cube_mesh(vk::context::EngineContext* eng) {
@@ -290,6 +412,56 @@ namespace {
             vmaUnmapMemory(eng->allocator, index_allocation_);
         }
 
+        void create_grid_mesh(vk::context::EngineContext* eng) {
+            // Create wireframe cube (edges only) for grid visualization
+            const float hs = VOXEL_SIZE * 0.5f;
+            std::vector<float> vertices = {
+                // 8 corners of cube
+                -hs, -hs, -hs,  0.0f, 0.0f, 0.0f,
+                 hs, -hs, -hs,  0.0f, 0.0f, 0.0f,
+                 hs,  hs, -hs,  0.0f, 0.0f, 0.0f,
+                -hs,  hs, -hs,  0.0f, 0.0f, 0.0f,
+                -hs, -hs,  hs,  0.0f, 0.0f, 0.0f,
+                 hs, -hs,  hs,  0.0f, 0.0f, 0.0f,
+                 hs,  hs,  hs,  0.0f, 0.0f, 0.0f,
+                -hs,  hs,  hs,  0.0f, 0.0f, 0.0f,
+            };
+
+            // 12 edges of cube
+            std::vector<uint32_t> indices = {
+                0, 1,  1, 2,  2, 3,  3, 0,  // Bottom face
+                4, 5,  5, 6,  6, 7,  7, 4,  // Top face
+                0, 4,  1, 5,  2, 6,  3, 7   // Vertical edges
+            };
+
+            grid_index_count_ = static_cast<uint32_t>(indices.size());
+
+            VkBufferCreateInfo buffer_info{};
+            buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+            buffer_info.size = vertices.size() * sizeof(float);
+            buffer_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+            VmaAllocationCreateInfo alloc_info{};
+            alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+            alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+            vmaCreateBuffer(eng->allocator, &buffer_info, &alloc_info, &grid_vertex_buffer_, &grid_vertex_allocation_, nullptr);
+
+            void* data;
+            vmaMapMemory(eng->allocator, grid_vertex_allocation_, &data);
+            std::memcpy(data, vertices.data(), vertices.size() * sizeof(float));
+            vmaUnmapMemory(eng->allocator, grid_vertex_allocation_);
+
+            buffer_info.size = indices.size() * sizeof(uint32_t);
+            buffer_info.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+            vmaCreateBuffer(eng->allocator, &buffer_info, &alloc_info, &grid_index_buffer_, &grid_index_allocation_, nullptr);
+
+            vmaMapMemory(eng->allocator, grid_index_allocation_, &data);
+            std::memcpy(data, indices.data(), indices.size() * sizeof(uint32_t));
+            vmaUnmapMemory(eng->allocator, grid_index_allocation_);
+        }
+
         void create_instance_buffer(vk::context::EngineContext* eng) {
             VkBufferCreateInfo buffer_info{};
             buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -308,8 +480,60 @@ namespace {
             vmaUnmapMemory(eng->allocator, instance_allocation_);
         }
 
-        void create_pipeline(vk::context::EngineContext* eng, vk::context::FrameContext* frame) {
-            // Load shaders
+        void create_all_grid_instance_buffer(vk::context::EngineContext* eng) {
+            // Create instance data for ALL grid cells (occupied and empty)
+            struct GridInstance {
+                vk::toolkit::math::Vec3 position;
+                float occupied; // 1.0 = occupied, 0.0 = empty
+            };
+
+            std::vector<GridInstance> instances;
+            instances.reserve(TOTAL_VOXELS);
+
+            for (int z = 0; z < GRID_SIZE; ++z) {
+                for (int y = 0; y < GRID_SIZE; ++y) {
+                    for (int x = 0; x < GRID_SIZE; ++x) {
+                        GridInstance inst;
+                        inst.position = vk::toolkit::math::Vec3{
+                            static_cast<float>(x) * VOXEL_SIZE - GRID_CENTER,
+                            static_cast<float>(y) * VOXEL_SIZE - GRID_CENTER,
+                            static_cast<float>(z) * VOXEL_SIZE - GRID_CENTER
+                        };
+                        inst.occupied = is_occupied(bitmap_, x, y, z) ? 1.0f : 0.0f;
+                        instances.push_back(inst);
+                    }
+                }
+            }
+
+            VkBufferCreateInfo buffer_info{};
+            buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+            buffer_info.size = instances.size() * sizeof(GridInstance);
+            buffer_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+            VmaAllocationCreateInfo alloc_info{};
+            alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+            alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+            vmaCreateBuffer(eng->allocator, &buffer_info, &alloc_info, &all_grid_instance_buffer_, &all_grid_instance_allocation_, nullptr);
+
+            void* data;
+            vmaMapMemory(eng->allocator, all_grid_instance_allocation_, &data);
+            std::memcpy(data, instances.data(), instances.size() * sizeof(GridInstance));
+            vmaUnmapMemory(eng->allocator, all_grid_instance_allocation_);
+
+            // Create density color buffer
+            if (!density_colors_.empty()) {
+                buffer_info.size = density_colors_.size() * sizeof(vk::toolkit::math::Vec3);
+                vmaCreateBuffer(eng->allocator, &buffer_info, &alloc_info, &density_color_buffer_, &density_color_allocation_, nullptr);
+
+                vmaMapMemory(eng->allocator, density_color_allocation_, &data);
+                std::memcpy(data, density_colors_.data(), density_colors_.size() * sizeof(vk::toolkit::math::Vec3));
+                vmaUnmapMemory(eng->allocator, density_color_allocation_);
+            }
+        }
+
+        void create_pipelines(vk::context::EngineContext* eng, vk::context::FrameContext* frame) {
+            // Load shaders - reuse bitfield shaders for now
             auto vert_code = load_shader_file("shader/bitfield.vert.spv");
             auto frag_code = load_shader_file("shader/bitfield.frag.spv");
 
@@ -328,7 +552,7 @@ namespace {
 
             // Pipeline layout
             VkPushConstantRange push_constant{};
-            push_constant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+            push_constant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
             push_constant.offset = 0;
             push_constant.size = sizeof(vk::toolkit::math::Mat4);
 
@@ -339,14 +563,14 @@ namespace {
 
             vkCreatePipelineLayout(eng->device, &layout_info, nullptr, &pipeline_layout_);
 
-            // Vertex input
+            // Vertex input for solid/transparent
             VkVertexInputBindingDescription bindings[2] = {};
             bindings[0].binding = 0;
             bindings[0].stride = 6 * sizeof(float);
             bindings[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
             bindings[1].binding = 1;
-            bindings[1].stride = sizeof(vk::toolkit::math::Vec3);
+            bindings[1].stride = sizeof(vk::toolkit::math::Vec3) + sizeof(float); // position + occupied flag
             bindings[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
 
             VkVertexInputAttributeDescription attributes[3] = {};
@@ -446,7 +670,38 @@ namespace {
             pipeline_info.pDynamicState = &dynamic_state;
             pipeline_info.layout = pipeline_layout_;
 
-            vkCreateGraphicsPipelines(eng->device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline_);
+            // Create solid pipeline
+            vkCreateGraphicsPipelines(eng->device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &solid_pipeline_);
+
+            // Create wireframe pipeline
+            rasterizer.polygonMode = VK_POLYGON_MODE_LINE;
+            rasterizer.lineWidth = 1.5f;
+            input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+            vkCreateGraphicsPipelines(eng->device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &wireframe_pipeline_);
+
+            // Create point pipeline
+            rasterizer.polygonMode = VK_POLYGON_MODE_POINT;
+            input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+            bindings[0].stride = sizeof(vk::toolkit::math::Vec3);
+            vertex_input.vertexBindingDescriptionCount = 1;
+            vertex_input.vertexAttributeDescriptionCount = 1;
+            vkCreateGraphicsPipelines(eng->device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &point_pipeline_);
+
+            // Create transparent pipeline
+            rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+            input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+            bindings[0].stride = 6 * sizeof(float);
+            vertex_input.vertexBindingDescriptionCount = 2;
+            vertex_input.vertexAttributeDescriptionCount = 3;
+            color_blend_attachment.blendEnable = VK_TRUE;
+            color_blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+            color_blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+            color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
+            color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+            color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+            depth_stencil.depthWriteEnable = VK_FALSE;
+            vkCreateGraphicsPipelines(eng->device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &transparent_pipeline_);
 
             vkDestroyShaderModule(eng->device, vert_module, nullptr);
             vkDestroyShaderModule(eng->device, frag_module, nullptr);
@@ -472,18 +727,38 @@ namespace {
         std::shared_ptr<vk::toolkit::camera::Camera> camera_;
         std::vector<uint8_t> bitmap_;
         std::vector<vk::toolkit::math::Vec3> voxel_positions_;
+        std::vector<vk::toolkit::math::Vec3> density_colors_;
 
+        // Mesh buffers
         VkBuffer vertex_buffer_{VK_NULL_HANDLE};
         VkBuffer index_buffer_{VK_NULL_HANDLE};
+        VkBuffer grid_vertex_buffer_{VK_NULL_HANDLE};
+        VkBuffer grid_index_buffer_{VK_NULL_HANDLE};
         VkBuffer instance_buffer_{VK_NULL_HANDLE};
+        VkBuffer all_grid_instance_buffer_{VK_NULL_HANDLE};
+        VkBuffer density_color_buffer_{VK_NULL_HANDLE};
+
         VmaAllocation vertex_allocation_{};
         VmaAllocation index_allocation_{};
+        VmaAllocation grid_vertex_allocation_{};
+        VmaAllocation grid_index_allocation_{};
         VmaAllocation instance_allocation_{};
+        VmaAllocation all_grid_instance_allocation_{};
+        VmaAllocation density_color_allocation_{};
+
         uint32_t vertex_count_{0};
         uint32_t index_count_{0};
+        uint32_t grid_index_count_{0};
 
+        // Pipelines
         VkPipelineLayout pipeline_layout_{VK_NULL_HANDLE};
-        VkPipeline pipeline_{VK_NULL_HANDLE};
+        VkPipeline solid_pipeline_{VK_NULL_HANDLE};
+        VkPipeline wireframe_pipeline_{VK_NULL_HANDLE};
+        VkPipeline point_pipeline_{VK_NULL_HANDLE};
+        VkPipeline transparent_pipeline_{VK_NULL_HANDLE};
+
+        // Visualization state
+        VisualizationMode viz_mode_{VisualizationMode::WireframeGrid};
     };
 }
 
