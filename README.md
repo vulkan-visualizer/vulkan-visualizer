@@ -79,74 +79,83 @@ target_link_libraries(my_app PRIVATE vk-core::vk-core)
 - **Shader compilation:** Slang shaders in `test/shaders/*.slang` are automatically compiled to SPIR-V at build time and placed in `build/shaders/`.
 - **Multiple Vulkan SDKs:** If you have multiple SDKs installed, explicitly set the `VULKAN_SDK` environment variable before running CMake to select the correct version.
 
-## Quick start (clear the swapchain)
-This minimal example renders a solid color directly to the swapchain. It uses a no-op UI system and a renderer that only issues a clear.
+## Quick start example
+
+This minimal example demonstrates how to set up a basic Vulkan application with ImGui. It creates a window, initializes Vulkan, and renders a spinning colored sphere using the framework's camera system.
 
 ```cpp
-import vk.engine;
+#include <GLFW/glfw3.h>
+#include <vulkan/vulkan_raii.hpp>
+
 import vk.context;
+import vk.swapchain;
+import vk.frame;
+import vk.pipeline;
+import vk.memory;
+import vk.geometry;
+import vk.imgui;
+import vk.camera;
+import vk.math;
 
-struct NullUi {
-    void set_main_window_title(const char*) {}
-    void create_imgui(vk::context::EngineContext&, VkFormat, uint32_t) {}
-    void destroy_imgui(vk::context::EngineContext&) {}
-    void process_event(const SDL_Event&) {}
-};
-
-struct ClearRenderer {
-    void query_required_device_caps(vk::context::RendererCaps& caps) {
-        caps.presentation_mode = vk::context::PresentationMode::DirectToSwapchain;
-        caps.color_attachments.clear();
-        caps.swapchain_usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        caps.enable_imgui = false;
-    }
-    void get_capabilities(vk::context::RendererCaps&) {}
-    void initialize(vk::context::EngineContext&, const vk::context::RendererCaps&, const vk::context::FrameContext&) {}
-    void destroy(vk::context::EngineContext&, const vk::context::RendererCaps&) {}
-
-    void record_graphics(VkCommandBuffer cmd, vk::context::EngineContext&, vk::context::FrameContext& frm) {
-        VkImageMemoryBarrier2 barrier{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
-            .srcAccessMask = 0,
-            .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .image = frm.swapchain_image,
-            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
-        };
-        VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier};
-        vkCmdPipelineBarrier2(cmd, &dep);
-
-        VkClearColorValue clear{{0.05f, 0.07f, 0.12f, 1.0f}};
-        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdClearColorImage(cmd, frm.swapchain_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear, 1, &range);
-    }
-};
+using namespace vk;
 
 int main() {
-    vk::engine::VulkanEngine engine;
-    ClearRenderer renderer;
-    NullUi ui;
-    engine.init(renderer, ui);
-    engine.run(renderer, ui);
-    engine.cleanup();
+    // Setup Vulkan context and window
+    auto [vkctx, surface] = context::setup_vk_context_glfw();
+    
+    // Create swapchain and frame synchronization
+    auto sc = swapchain::setup_swapchain(vkctx, surface);
+    auto frames = frame::create_frame_system(vkctx, sc, 2);
+    
+    // Initialize ImGui
+    auto imgui_sys = imgui::create(vkctx, surface.window.get(), sc.format, 2, sc.images.size());
+    
+    // Create camera
+    camera::Camera cam;
+    
+    // Main loop
+    uint32_t frame_index = 0;
+    while (!glfwWindowShouldClose(surface.window.get())) {
+        glfwPollEvents();
+        
+        auto ar = frame::begin_frame(vkctx, sc, frames, frame_index);
+        if (!ar.ok) continue;
+        
+        frame::begin_commands(frames, frame_index);
+        imgui::begin_frame();
+        
+        // Your ImGui UI here
+        ImGui::Begin("Hello");
+        ImGui::Text("Vulkan Visualizer 1.2.0");
+        ImGui::End();
+        
+        // Record rendering commands...
+        auto& cmd = frame::cmd(frames, frame_index);
+        // ... your drawing code here ...
+        
+        frame::end_frame(vkctx, sc, frames, frame_index, ar.image_index);
+        frame_index = (frame_index + 1) % frames.frames_in_flight;
+    }
+    
+    vkctx.device.waitIdle();
+    imgui::shutdown(imgui_sys);
     return 0;
 }
 ```
 
+For a complete working example with mesh rendering, shaders, and camera controls, see `test/test_vk.cpp`.
+
 ## Contributing
 - The project prefers small, focused PRs. If you want to add a renderer plugin or a toolkit helper, keep the module interface stable and provide accompanying tests/examples under `test/`.
+- When contributing shader code, please use Slang format (`.slang` files) and ensure they compile with `slangc` from the Vulkan SDK.
 
 ## License
-- This project is released under the repository's `LICENSE` file (see top-level `LICENSE`).
+This project is released under the **Mozilla Public License Version 2.0** (see the `LICENSE` file in the repository root).
 
 ## Acknowledgements
-- Uses SDL3 for platform windowing, vk-bootstrap for instance/device setup, and VMA for memory management. Third-party code is pulled via CMake FetchContent at configure time.
+- **Vulkan-Hpp** — Provides modern C++ RAII wrappers for Vulkan.
+- **GLFW** — Cross-platform windowing and input library.
+- **ImGui** — Immediate mode GUI framework with docking and viewports support.
+- **Slang** — Shader compilation infrastructure bundled with the Vulkan SDK.
 
-If you'd like, I can also:
-- Add a short section describing how to run the small test executables in `cmake-build-debug`.
-- Add a troubleshooting section for common build errors on MSVC/Clang.
-
-(Assumptions: v1.1.1 is a patch release—no major API changes from v1.1.0; this README update focuses on documentation, build guidance, and a concise changelog.)
+Dependencies are automatically downloaded and built via CMake FetchContent at configure time.
