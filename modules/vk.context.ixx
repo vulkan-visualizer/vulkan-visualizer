@@ -39,5 +39,5 @@ namespace vk::context {
         SurfaceContext& operator=(SurfaceContext&&) noexcept = default;
     };
 
-    export [[nodiscard]] std::pair<VulkanContext, SurfaceContext> setup_vk_context_glfw();
+    export [[nodiscard]] std::pair<VulkanContext, SurfaceContext> setup_vk_context_glfw(const std::string& app_name, const std::string& engine_name);
 } // namespace vk::context

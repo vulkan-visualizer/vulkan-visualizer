@@ -354,7 +354,7 @@ static void record_commands(const VulkanContext& vkctx, const Swapchain& sc, con
 }
 
 int main() {
-    auto [vkctx, surface] = setup_vk_context_glfw();
+    auto [vkctx, surface] = setup_vk_context_glfw("App", "Engine");
     Swapchain sc          = setup_swapchain(vkctx, surface);
 
     UiState ui{};

@@ -208,21 +208,26 @@ namespace vk::context {
     }
 } // namespace vk::context
 
-std::pair<vk::context::VulkanContext, vk::context::SurfaceContext> vk::context::setup_vk_context_glfw() {
+namespace {
+    std::vector<const char*> required_layers() {
+        return {"VK_LAYER_KHRONOS_validation"};
+    }
+    std::vector<const char*> required_extensions() {
+        uint32_t glfw_extension_count = 0;
+        const auto glfw_extensions    = glfwGetRequiredInstanceExtensions(&glfw_extension_count);
+        std::vector required_extensions(glfw_extensions, glfw_extensions + glfw_extension_count);
+        required_extensions.push_back(vk::EXTDebugUtilsExtensionName);
+        return required_extensions;
+    }
+} // namespace
+
+std::pair<vk::context::VulkanContext, vk::context::SurfaceContext> vk::context::setup_vk_context_glfw(const std::string& app_name, const std::string& engine_name) {
     if (!glfwInit()) throw std::runtime_error("Failed to initialize GLFW");
-
-    uint32_t glfw_extension_count = 0;
-    const auto glfw_extensions    = glfwGetRequiredInstanceExtensions(&glfw_extension_count);
-
-    std::vector required_extensions(glfw_extensions, glfw_extensions + glfw_extension_count);
-    required_extensions.push_back(EXTDebugUtilsExtensionName);
-
-    std::vector required_layers = {"VK_LAYER_KHRONOS_validation"};
 
     VulkanContext vk_context;
     SurfaceContext surface_context;
 
-    vk_context.instance        = create_instance_raii(vk_context.context, "App", "Engine", required_layers, required_extensions);
+    vk_context.instance        = create_instance_raii(vk_context.context, app_name.c_str(), engine_name.c_str(), required_layers(), required_extensions());
     vk_context.debug_messenger = create_debug_messenger_raii(vk_context.instance);
 
     auto [surface, window, extent] = create_surface_raii(vk_context.instance);
