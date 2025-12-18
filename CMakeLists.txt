@@ -62,6 +62,7 @@ target_sources(vk-core
         src/vk.memory.cpp
         src/vk.pipeline.cpp
         src/vk.swapchain.cpp
+        src/vk.texture.cpp
         # ${_VULKAN_HPP_IMPL}
         ${_IMGUI_SOURCES}
         PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
@@ -74,6 +75,7 @@ target_sources(vk-core
         modules/vk.memory.ixx
         modules/vk.pipeline.ixx
         modules/vk.swapchain.ixx
+        modules/vk.texture.ixx
 )
 target_link_libraries(vk-core PUBLIC Vulkan::Vulkan glfw)
 target_compile_definitions(vk-core PUBLIC VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1 VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1)

@@ -123,7 +123,8 @@ namespace vk::context {
             {.extendedDynamicState = true},
         };
 
-        features.get<PhysicalDeviceFeatures2>().features.fillModeNonSolid = true;
+        features.get<PhysicalDeviceFeatures2>().features.fillModeNonSolid  = true;
+        features.get<PhysicalDeviceFeatures2>().features.samplerAnisotropy = VK_TRUE;
 
         constexpr float queue_priority = 1.0f;
 

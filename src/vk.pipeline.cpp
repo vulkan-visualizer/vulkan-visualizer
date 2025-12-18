@@ -47,7 +47,7 @@ std::vector<std::byte> vk::pipeline::read_file_bytes(const std::string& path) {
 vk::raii::ShaderModule vk::pipeline::load_shader_module(const raii::Device& device, std::span<const std::byte> spv) {
     if (spv.size_bytes() % 4 != 0) throw std::runtime_error("SPIR-V size must be multiple of 4");
 
-    const vk::ShaderModuleCreateInfo ci{
+    const ShaderModuleCreateInfo ci{
         .codeSize = spv.size_bytes(),
         .pCode    = reinterpret_cast<const uint32_t*>(spv.data()),
     };
@@ -57,22 +57,33 @@ vk::raii::ShaderModule vk::pipeline::load_shader_module(const raii::Device& devi
 vk::pipeline::GraphicsPipeline vk::pipeline::create_graphics_pipeline(const raii::Device& device, const VertexInput& vin, const GraphicsPipelineDesc& desc, const raii::ShaderModule& shader_module, const char* vs_entry, const char* fs_entry) {
     GraphicsPipeline out{};
 
-    PushConstantRange pcr{};
-    PipelineLayoutCreateInfo plci{};
+    /* ------------------------------------------------------------ */
+    /* Pipeline layout (descriptor sets + push constants)           */
+    /* ------------------------------------------------------------ */
 
+    std::vector<PushConstantRange> push_ranges;
     if (desc.push_constant_bytes > 0) {
-        pcr = {
+        push_ranges.push_back({
             .stageFlags = desc.push_constant_stages,
             .offset     = 0,
             .size       = desc.push_constant_bytes,
-        };
-        plci.pushConstantRangeCount = 1;
-        plci.pPushConstantRanges    = &pcr;
+        });
     }
 
-    out.layout = raii::PipelineLayout{device, plci};
+    const PipelineLayoutCreateInfo pl_ci{
+        .setLayoutCount         = static_cast<uint32_t>(desc.set_layouts.size()),
+        .pSetLayouts            = desc.set_layouts.data(),
+        .pushConstantRangeCount = static_cast<uint32_t>(push_ranges.size()),
+        .pPushConstantRanges    = push_ranges.data(),
+    };
 
-    const PipelineShaderStageCreateInfo stages[] = {
+    out.layout = raii::PipelineLayout{device, pl_ci};
+
+    /* ------------------------------------------------------------ */
+    /* Shader stages                                                */
+    /* ------------------------------------------------------------ */
+
+    const std::array<PipelineShaderStageCreateInfo, 2> stages{{
         {
             .stage  = ShaderStageFlagBits::eVertex,
             .module = *shader_module,
@@ -83,7 +94,11 @@ vk::pipeline::GraphicsPipeline vk::pipeline::create_graphics_pipeline(const raii
             .module = *shader_module,
             .pName  = fs_entry,
         },
-    };
+    }};
+
+    /* ------------------------------------------------------------ */
+    /* Fixed-function states                                        */
+    /* ------------------------------------------------------------ */
 
     const PipelineVertexInputStateCreateInfo vi{
         .vertexBindingDescriptionCount   = 1,
@@ -136,6 +151,10 @@ vk::pipeline::GraphicsPipeline vk::pipeline::create_graphics_pipeline(const raii
         .pDynamicStates    = dyn_states,
     };
 
+    /* ------------------------------------------------------------ */
+    /* Dynamic rendering                                            */
+    /* ------------------------------------------------------------ */
+
     PipelineRenderingCreateInfo rendering{
         .colorAttachmentCount    = 1,
         .pColorAttachmentFormats = &desc.color_format,
@@ -148,10 +167,14 @@ vk::pipeline::GraphicsPipeline vk::pipeline::create_graphics_pipeline(const raii
         }
     }
 
+    /* ------------------------------------------------------------ */
+    /* Pipeline creation                                            */
+    /* ------------------------------------------------------------ */
+
     const GraphicsPipelineCreateInfo gpi{
         .pNext               = &rendering,
-        .stageCount          = 2,
-        .pStages             = stages,
+        .stageCount          = static_cast<uint32_t>(stages.size()),
+        .pStages             = stages.data(),
         .pVertexInputState   = &vi,
         .pInputAssemblyState = &ia,
         .pViewportState      = &vp,

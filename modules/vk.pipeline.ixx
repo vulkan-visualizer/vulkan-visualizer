@@ -20,13 +20,14 @@ namespace vk::pipeline {
         PrimitiveTopology topology{PrimitiveTopology::eTriangleList};
         CullModeFlags cull{CullModeFlagBits::eBack};
         FrontFace front_face{FrontFace::eCounterClockwise};
-
         PolygonMode polygon_mode{PolygonMode::eFill};
 
         bool enable_blend{false};
 
         uint32_t push_constant_bytes{0};
         ShaderStageFlags push_constant_stages{ShaderStageFlagBits::eVertex | ShaderStageFlagBits::eFragment};
+
+        std::vector<DescriptorSetLayout> set_layouts{};
     };
 
     export struct VertexInput {
@@ -91,6 +92,41 @@ vk::pipeline::VertexInput vk::pipeline::make_vertex_input<vk::geometry::VertexP3
             .offset   = static_cast<uint32_t>(offsetof(V, color)),
         },
     };
+    return out;
+}
+
+template <>
+vk::pipeline::VertexInput vk::pipeline::make_vertex_input<vk::geometry::VertexP3C4T2>() {
+    using V = geometry::VertexP3C4T2;
+
+    VertexInput out{};
+    out.binding = {
+        .binding   = 0,
+        .stride    = sizeof(V),
+        .inputRate = VertexInputRate::eVertex,
+    };
+
+    out.attributes = {
+        {
+            .location = 0,
+            .binding  = 0,
+            .format   = Format::eR32G32B32Sfloat,
+            .offset   = static_cast<uint32_t>(offsetof(V, position)),
+        },
+        {
+            .location = 1,
+            .binding  = 0,
+            .format   = Format::eR32G32B32A32Sfloat,
+            .offset   = static_cast<uint32_t>(offsetof(V, color)),
+        },
+        {
+            .location = 2,
+            .binding  = 0,
+            .format   = Format::eR32G32Sfloat,
+            .offset   = static_cast<uint32_t>(offsetof(V, uv)),
+        },
+    };
+
     return out;
 }
 

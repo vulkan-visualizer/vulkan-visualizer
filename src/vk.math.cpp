@@ -145,7 +145,6 @@ vk::math::vec4 vk::math::operator*(const mat4& m, const vec4 v) noexcept {
 
 
 vk::math::mat4 vk::math::translate(const vec3 t) noexcept {
-    using namespace vk::math;
     mat4 m = identity_mat4();
     m.c3.x = t.x;
     m.c3.y = t.y;
@@ -154,7 +153,6 @@ vk::math::mat4 vk::math::translate(const vec3 t) noexcept {
 }
 
 vk::math::mat4 vk::math::rotate_y(const float radians) noexcept {
-    using namespace vk::math;
     const float c = std::cos(radians);
     const float s = std::sin(radians);
 
