@@ -60,7 +60,7 @@ namespace {
     }
 
     [[nodiscard]] vk::CompositeAlphaFlagBitsKHR choose_composite_alpha(const vk::SurfaceCapabilitiesKHR& caps) {
-        const vk::CompositeAlphaFlagBitsKHR preferred[] = {
+        constexpr vk::CompositeAlphaFlagBitsKHR preferred[] = {
             vk::CompositeAlphaFlagBitsKHR::eOpaque,
             vk::CompositeAlphaFlagBitsKHR::ePreMultiplied,
             vk::CompositeAlphaFlagBitsKHR::ePostMultiplied,
@@ -81,20 +81,10 @@ namespace {
 
     [[nodiscard]] vk::ImageUsageFlags choose_swapchain_usage(const vk::SurfaceCapabilitiesKHR& caps) {
         const vk::ImageUsageFlags supported = caps.supportedUsageFlags;
-
-        if ((supported & vk::ImageUsageFlagBits::eColorAttachment) != vk::ImageUsageFlagBits::eColorAttachment) {
-            throw std::runtime_error("Swapchain must support eColorAttachment usage");
-        }
-
+        if ((supported & vk::ImageUsageFlagBits::eColorAttachment) != vk::ImageUsageFlagBits::eColorAttachment) throw std::runtime_error("Swapchain must support eColorAttachment usage");
         vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eColorAttachment;
-
-        if ((supported & vk::ImageUsageFlagBits::eTransferDst) == vk::ImageUsageFlagBits::eTransferDst) {
-            usage |= vk::ImageUsageFlagBits::eTransferDst;
-        }
-        if ((supported & vk::ImageUsageFlagBits::eTransferSrc) == vk::ImageUsageFlagBits::eTransferSrc) {
-            usage |= vk::ImageUsageFlagBits::eTransferSrc;
-        }
-
+        if ((supported & vk::ImageUsageFlagBits::eTransferDst) == vk::ImageUsageFlagBits::eTransferDst) usage |= vk::ImageUsageFlagBits::eTransferDst;
+        if ((supported & vk::ImageUsageFlagBits::eTransferSrc) == vk::ImageUsageFlagBits::eTransferSrc) usage |= vk::ImageUsageFlagBits::eTransferSrc;
         return usage;
     }
 
@@ -130,7 +120,7 @@ namespace {
     }
 
     [[nodiscard]] vk::Format choose_depth_format(const vk::raii::PhysicalDevice& pd) {
-        const vk::Format candidates[] = {
+        constexpr vk::Format candidates[] = {
             vk::Format::eD32Sfloat,
             vk::Format::eD32SfloatS8Uint,
             vk::Format::eD24UnormS8Uint,
@@ -217,13 +207,11 @@ vk::swapchain::Swapchain vk::swapchain::setup_swapchain(const context::VulkanCon
     if (fmts.empty()) throw std::runtime_error("Surface has no formats");
     if (modes.empty()) throw std::runtime_error("Surface has no present modes");
 
-    const auto [format, colorSpace]   = choose_surface_format(fmts);
-    const auto present_mode = choose_present_mode(modes);
-    const auto extent       = choose_extent(caps, sctx.extent);
+    const auto [format, colorSpace] = choose_surface_format(fmts);
+    const auto present_mode         = choose_present_mode(modes);
+    const auto extent               = choose_extent(caps, sctx.extent);
 
-    if (extent.width == 0 || extent.height == 0) {
-        throw std::runtime_error("Cannot create swapchain with zero extent");
-    }
+    if (extent.width == 0 || extent.height == 0) throw std::runtime_error("Cannot create swapchain with zero extent");
 
     const auto image_count = choose_image_count(caps);
     const auto usage       = choose_swapchain_usage(caps);
@@ -231,9 +219,9 @@ vk::swapchain::Swapchain vk::swapchain::setup_swapchain(const context::VulkanCon
     const auto composite = choose_composite_alpha(caps);
     const auto transform = choose_pre_transform(caps);
 
-    const uint32_t graphics_q = vkctx.graphics_queue_index;
-    const uint32_t present_q  = vkctx.graphics_queue_index;
-    const auto sharing        = choose_sharing(graphics_q, present_q);
+    const uint32_t graphics_q         = vkctx.graphics_queue_index;
+    const uint32_t present_q          = vkctx.graphics_queue_index;
+    const auto [mode, indices, count] = choose_sharing(graphics_q, present_q);
 
     SwapchainCreateInfoKHR ci{
         .surface          = *sctx.surface,
@@ -243,7 +231,7 @@ vk::swapchain::Swapchain vk::swapchain::setup_swapchain(const context::VulkanCon
         .imageExtent      = extent,
         .imageArrayLayers = 1,
         .imageUsage       = usage,
-        .imageSharingMode = sharing.mode,
+        .imageSharingMode = mode,
         .preTransform     = transform,
         .compositeAlpha   = composite,
         .presentMode      = present_mode,
@@ -251,9 +239,9 @@ vk::swapchain::Swapchain vk::swapchain::setup_swapchain(const context::VulkanCon
         .oldSwapchain     = old ? *old->handle : VK_NULL_HANDLE,
     };
 
-    if (sharing.count) {
-        ci.queueFamilyIndexCount = sharing.count;
-        ci.pQueueFamilyIndices   = sharing.indices.data();
+    if (count) {
+        ci.queueFamilyIndexCount = count;
+        ci.pQueueFamilyIndices   = indices.data();
     }
 
     Swapchain sc{};
@@ -284,11 +272,11 @@ vk::swapchain::Swapchain vk::swapchain::setup_swapchain(const context::VulkanCon
     sc.depth_aspect = depth_aspect(sc.depth_format);
 
     {
-        auto d          = create_depth_resources(vkctx.device, vkctx.physical_device, sc.extent, sc.depth_format, sc.depth_aspect);
-        sc.depth_image  = std::move(d.image);
-        sc.depth_memory = std::move(d.memory);
-        sc.depth_view   = std::move(d.view);
-        sc.depth_layout = ImageLayout::eUndefined;
+        auto [image, memory, view] = create_depth_resources(vkctx.device, vkctx.physical_device, sc.extent, sc.depth_format, sc.depth_aspect);
+        sc.depth_image             = std::move(image);
+        sc.depth_memory            = std::move(memory);
+        sc.depth_view              = std::move(view);
+        sc.depth_layout            = ImageLayout::eUndefined;
     }
 
     return sc;
