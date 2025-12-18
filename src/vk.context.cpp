@@ -8,22 +8,93 @@ import std;
 
 
 namespace vk::context {
+
+    namespace {
+
+        struct DeviceCreatePolicy {
+            bool want_ext_dynamic_state   = true;
+            bool want_fill_mode_non_solid = true;
+            bool want_sampler_anisotropy  = true;
+        };
+
+        [[nodiscard]] bool has_device_extension(const raii::PhysicalDevice& pd, const char* name) {
+            const auto exts = pd.enumerateDeviceExtensionProperties();
+            return std::ranges::any_of(exts, [name](const auto& e) { return std::strcmp(e.extensionName, name) == 0; });
+        }
+
+        template <typename Properties, typename Accessor>
+        void ensure_support(const std::string_view label, const std::span<const char* const> required, const Properties& available, Accessor accessor) {
+            for (const char* name : required) {
+                if (const bool found = std::ranges::any_of(available, [&](const auto& property) { return std::strcmp(accessor(property), name) == 0; }); !found) {
+                    std::string message;
+                    message.reserve(label.size() + std::strlen(name) + 32);
+                    message += "Required ";
+                    message += label;
+                    message += " not supported: ";
+                    message += name;
+                    throw std::runtime_error(message);
+                }
+            }
+        }
+
+        [[nodiscard]] bool supports_graphics_queue(const raii::PhysicalDevice& device) {
+            const auto families = device.getQueueFamilyProperties();
+            return std::ranges::any_of(families, [](const auto& qf) { return static_cast<bool>(qf.queueFlags & QueueFlagBits::eGraphics); });
+        }
+
+        [[nodiscard]] bool meets_device_requirements(const raii::PhysicalDevice& device) {
+            if (device.getProperties().apiVersion < VK_API_VERSION_1_4) return false;
+            if (!supports_graphics_queue(device)) return false;
+            if (!has_device_extension(device, KHRSwapchainExtensionName)) return false;
+            return true;
+        }
+
+        [[nodiscard]] uint32_t find_graphics_present_queue_index(const raii::PhysicalDevice& device, const raii::SurfaceKHR& surface) {
+            const auto queue_families = device.getQueueFamilyProperties();
+            for (uint32_t i = 0; i < queue_families.size(); ++i) {
+                const bool supports_graphics = static_cast<bool>(queue_families[i].queueFlags & QueueFlagBits::eGraphics);
+                const bool supports_present  = device.getSurfaceSupportKHR(i, surface);
+                if (supports_graphics && supports_present) return i;
+            }
+            throw std::runtime_error("No queue family supports both graphics and present");
+        }
+
+        [[nodiscard]] auto build_feature_chain(const DeviceCreatePolicy& policy, const bool enable_ext_dynamic_state) {
+            StructureChain<PhysicalDeviceFeatures2, PhysicalDeviceVulkan11Features, PhysicalDeviceVulkan13Features, PhysicalDeviceExtendedDynamicStateFeaturesEXT> features{
+                {},
+                {.shaderDrawParameters = VK_TRUE},
+                {.synchronization2 = VK_TRUE, .dynamicRendering = VK_TRUE},
+                {.extendedDynamicState = enable_ext_dynamic_state ? VK_TRUE : VK_FALSE},
+            };
+
+            if (policy.want_fill_mode_non_solid) {
+                features.get<PhysicalDeviceFeatures2>().features.fillModeNonSolid = VK_TRUE;
+            }
+            if (policy.want_sampler_anisotropy) {
+                features.get<PhysicalDeviceFeatures2>().features.samplerAnisotropy = VK_TRUE;
+            }
+
+            return features;
+        }
+
+        [[nodiscard]] Extent2D framebuffer_extent(const std::shared_ptr<GLFWwindow>& window) {
+            int w = 0;
+            int h = 0;
+            glfwGetFramebufferSize(window.get(), &w, &h);
+            return {static_cast<uint32_t>(w), static_cast<uint32_t>(h)};
+        }
+    } // namespace
+
     void check_validation_layers_support(const raii::Context& context, const std::span<const char* const> required_layers) {
-        auto layer_properties = context.enumerateInstanceLayerProperties();
-        for (auto const& required_layer : required_layers) {
-            if (std::ranges::none_of(layer_properties, [required_layer](auto const& layerProperty) { return strcmp(layerProperty.layerName, required_layer) == 0; })) {
-                throw std::runtime_error("Required layer not supported: " + std::string(required_layer));
-            }
-        }
+        const auto layer_properties = context.enumerateInstanceLayerProperties();
+        ensure_support("layer", required_layers, layer_properties, [](const auto& property) { return property.layerName; });
     }
+
     void check_extensions_support(const raii::Context& context, const std::span<const char* const> required_extensions) {
-        auto extension_properties = context.enumerateInstanceExtensionProperties();
-        for (auto const& required_extension : required_extensions) {
-            if (std::ranges::none_of(extension_properties, [required_extension](auto const& extensionProperty) { return strcmp(extensionProperty.extensionName, required_extension) == 0; })) {
-                throw std::runtime_error("Required extension not supported: " + std::string(required_extension));
-            }
-        }
+        const auto extension_properties = context.enumerateInstanceExtensionProperties();
+        ensure_support("extension", required_extensions, extension_properties, [](const auto& property) { return property.extensionName; });
     }
+
     VKAPI_ATTR Bool32 VKAPI_CALL debug_callback(const DebugUtilsMessageSeverityFlagBitsEXT severity, const DebugUtilsMessageTypeFlagsEXT type, const DebugUtilsMessengerCallbackDataEXT* pCallbackData, void*) {
         if (const auto sev = DebugUtilsMessageSeverityFlagsEXT(severity); sev & (DebugUtilsMessageSeverityFlagBitsEXT::eWarning | DebugUtilsMessageSeverityFlagBitsEXT::eError)) {
             std::cerr << "validation layer: type " << to_string(type) << " msg: " << pCallbackData->pMessage << std::endl;
@@ -31,16 +102,12 @@ namespace vk::context {
         return False;
     }
 
-    [[nodiscard]] bool has_device_extension(const raii::PhysicalDevice& pd, const char* name) {
-        const auto exts = pd.enumerateDeviceExtensionProperties();
-        return std::ranges::any_of(exts, [&](const auto& e) { return std::strcmp(e.extensionName, name) == 0; });
-    }
-
-    [[nodiscard]] std::vector<const char*> build_device_extensions(const raii::PhysicalDevice& pd, const bool want_ext_dynamic_state) {
-        std::vector<const char*> exts;
-        exts.push_back(KHRSwapchainExtensionName);
-
-        if (want_ext_dynamic_state && has_device_extension(pd, EXTExtendedDynamicStateExtensionName)) {
+    [[nodiscard]] std::vector<const char*> build_device_extensions(const raii::PhysicalDevice& pd, const bool enable_ext_dynamic_state) {
+        std::vector exts{KHRSwapchainExtensionName};
+        if (enable_ext_dynamic_state) {
+            if (!has_device_extension(pd, EXTExtendedDynamicStateExtensionName)) {
+                throw std::runtime_error("Requested VK_EXT_extended_dynamic_state but device does not support it");
+            }
             exts.push_back(EXTExtendedDynamicStateExtensionName);
         }
         return exts;
@@ -80,79 +147,42 @@ namespace vk::context {
     auto create_surface_raii(const raii::Instance& instance) {
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+
         auto window = std::shared_ptr<GLFWwindow>(glfwCreateWindow(1920, 1080, "Vulkan Engine Window", nullptr, nullptr), [](GLFWwindow* ptr) { glfwDestroyWindow(ptr); });
-        VkSurfaceKHR _surface;
-        if (glfwCreateWindowSurface(*instance, window.get(), nullptr, &_surface) != 0) throw std::runtime_error("failed to create window surface!");
-        auto surface = raii::SurfaceKHR(instance, _surface);
-        int w = 0, h = 0;
-        glfwGetFramebufferSize(window.get(), &w, &h);
-        Extent2D extent = {static_cast<uint32_t>(w), static_cast<uint32_t>(h)};
-        return std::make_tuple(std::move(surface), std::move(window), extent);
+        if (!window) throw std::runtime_error("failed to create GLFW window");
+
+        VkSurfaceKHR raw_surface = VK_NULL_HANDLE;
+        if (glfwCreateWindowSurface(*instance, window.get(), nullptr, &raw_surface) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create window surface");
+        }
+
+        auto surface = raii::SurfaceKHR(instance, raw_surface);
+        return std::make_tuple(std::move(surface), std::move(window), framebuffer_extent(window));
     }
 
     raii::PhysicalDevice pick_physical_device_raii(const raii::Instance& instance) {
         const auto devices = instance.enumeratePhysicalDevices();
 
-        auto has_graphics_queue = [&](const raii::PhysicalDevice& device) {
-            const auto families = device.getQueueFamilyProperties();
-            return std::ranges::any_of(families, [](const auto& qf) { return static_cast<bool>(qf.queueFlags & QueueFlagBits::eGraphics); });
-        };
-
-        auto is_usable = [&](const raii::PhysicalDevice& device) {
-            if (const auto props = device.getProperties(); props.apiVersion < VK_API_VERSION_1_4) return false;
-            if (!has_graphics_queue(device)) return false;
-            if (!has_device_extension(device, KHRSwapchainExtensionName)) return false;
-            return true;
-        };
-
-        if (const auto it = std::ranges::find_if(devices, is_usable); it != devices.end()) {
+        if (const auto it = std::ranges::find_if(devices, meets_device_requirements); it != devices.end()) {
             return *it;
         }
         throw std::runtime_error("failed to find a suitable GPU");
     }
 
 
-    struct DeviceCreatePolicy {
-        bool want_ext_dynamic_state   = true;
-        bool want_fill_mode_non_solid = true;
-        bool want_sampler_anisotropy  = true;
-    };
-
     auto create_logical_device_raii(const raii::PhysicalDevice& physical_device, const raii::SurfaceKHR& surface, const DeviceCreatePolicy& policy) {
-        const auto queue_families = physical_device.getQueueFamilyProperties();
+        const uint32_t graphics_queue_index = find_graphics_present_queue_index(physical_device, surface);
 
-        const auto graphics_queue_index = [&]() -> uint32_t {
-            for (uint32_t i = 0; i < queue_families.size(); ++i) {
-                const bool supports_graphics = static_cast<bool>(queue_families[i].queueFlags & QueueFlagBits::eGraphics);
-                const bool supports_present  = physical_device.getSurfaceSupportKHR(i, surface);
-                if (supports_graphics && supports_present) return i;
-            }
-            throw std::runtime_error("No queue family supports both graphics and present");
-        }();
+        const bool ext_dyn_state_enabled = policy.want_ext_dynamic_state && has_device_extension(physical_device, EXTExtendedDynamicStateExtensionName);
+        const auto enabled_exts          = build_device_extensions(physical_device, ext_dyn_state_enabled);
+        auto features                    = build_feature_chain(policy, ext_dyn_state_enabled);
 
-        const auto enabled_exts          = build_device_extensions(physical_device, policy.want_ext_dynamic_state);
-        const bool ext_dyn_state_enabled = std::ranges::any_of(enabled_exts, [](const char* s) { return std::strcmp(s, EXTExtendedDynamicStateExtensionName) == 0; });
-
-        StructureChain<PhysicalDeviceFeatures2, PhysicalDeviceVulkan11Features, PhysicalDeviceVulkan13Features, PhysicalDeviceExtendedDynamicStateFeaturesEXT> features{
-            {},
-            {.shaderDrawParameters = true},
-            {.synchronization2 = true, .dynamicRendering = true},
-            {.extendedDynamicState = ext_dyn_state_enabled ? VK_TRUE : VK_FALSE},
-        };
-
-        if (policy.want_fill_mode_non_solid) {
-            features.get<PhysicalDeviceFeatures2>().features.fillModeNonSolid = VK_TRUE;
-        }
-        if (policy.want_sampler_anisotropy) {
-            features.get<PhysicalDeviceFeatures2>().features.samplerAnisotropy = VK_TRUE;
-        }
-
-        constexpr float queue_priority = 1.0f;
+        constexpr std::array queue_priority{1.0f};
 
         const DeviceQueueCreateInfo queue_ci{
             .queueFamilyIndex = graphics_queue_index,
             .queueCount       = 1,
-            .pQueuePriorities = &queue_priority,
+            .pQueuePriorities = queue_priority.data(),
         };
 
         const DeviceCreateInfo device_ci{
@@ -209,6 +239,7 @@ std::pair<vk::context::VulkanContext, vk::context::SurfaceContext> vk::context::
     };
 
     auto [device, graphics_queue, graphics_queue_index, enabled_device_exts] = create_logical_device_raii(vk_context.physical_device, surface_context.surface, policy);
+    (void) enabled_device_exts;
 
     vk_context.device               = std::move(device);
     vk_context.graphics_queue       = std::move(graphics_queue);
