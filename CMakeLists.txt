@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 project(vulkan_visualizer VERSION 1.2.0 LANGUAGES CXX)
 
-option(VK_XAYAH_BUILD_APP "Build the Vulkan Visualizer application" ON)
+option(VK_XAYAH_BUILD_APP "Build the Vulkan Visualizer application" OFF)
 option(VK_XAYAH_BUILD_TESTS "Build the Vulkan Visualizer tests" OFF)
 
 # ============================================================================
@@ -110,7 +110,7 @@ function(add_slang_shader_target)
     endif ()
 
     if (NOT SLANG_OUTPUT_DIR)
-        set(SLANG_OUTPUT_DIR ${CMAKE_BINARY_DIR}/shaders)
+        set(SLANG_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
     endif ()
 
     set(OUTPUTS)
