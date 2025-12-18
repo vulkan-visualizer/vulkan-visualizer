@@ -284,16 +284,24 @@ namespace vk::texture {
 
     raii::DescriptorSetLayout make_texture_set_layout(const raii::Device& device) {
 
-        const DescriptorSetLayoutBinding binding{
-            .binding         = 0,
-            .descriptorType  = DescriptorType::eCombinedImageSampler,
-            .descriptorCount = 1,
-            .stageFlags      = ShaderStageFlagBits::eFragment,
-        };
+        const std::array<DescriptorSetLayoutBinding, 2> bindings{{
+            {
+                .binding         = 0,
+                .descriptorType  = DescriptorType::eSampledImage,
+                .descriptorCount = 1,
+                .stageFlags      = ShaderStageFlagBits::eFragment,
+            },
+            {
+                .binding         = 1,
+                .descriptorType  = DescriptorType::eSampler,
+                .descriptorCount = 1,
+                .stageFlags      = ShaderStageFlagBits::eFragment,
+            },
+        }};
 
         const DescriptorSetLayoutCreateInfo ci{
-            .bindingCount = 1,
-            .pBindings    = &binding,
+            .bindingCount = static_cast<uint32_t>(bindings.size()),
+            .pBindings    = bindings.data(),
         };
 
         return raii::DescriptorSetLayout{device, ci};

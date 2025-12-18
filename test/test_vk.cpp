@@ -143,8 +143,7 @@ static RenderState create_render_state(const VulkanContext& vkctx, const Swapcha
     out.pipeline = create_graphics_pipeline(vkctx.device, vin, desc, out.shader, "vertMain", "fragMain");
     return out;
 }
-
-static void record_commands(const VulkanContext& vkctx, const Swapchain& sc, const RenderState& render, const MeshState& mesh, FrameSystem& frames, uint32_t frame_index, uint32_t image_index, const mat4& mvp, imgui::ImGuiSystem& imgui_sys) {
+void record_commands(const VulkanContext& vkctx, const Swapchain& sc, const RenderState& render, const MeshState& mesh, FrameSystem& frames, uint32_t frame_index, uint32_t image_index, const mat4& mvp, imgui::ImGuiSystem& imgui_sys) {
     (void) vkctx;
 
     auto& cmd = frame::cmd(frames, frame_index);
