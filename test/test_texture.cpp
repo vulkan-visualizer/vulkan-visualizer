@@ -133,15 +133,16 @@ static TextureBinding create_texture_binding(const VulkanContext& vkctx, const T
     TextureBinding out{};
     out.layout = vk::texture::make_texture_set_layout(vkctx.device);
 
-    const DescriptorPoolSize ps{
-        .type            = DescriptorType::eCombinedImageSampler,
-        .descriptorCount = 1,
+    const DescriptorPoolSize pool_sizes[] = {
+        {DescriptorType::eSampledImage, 1},
+        {DescriptorType::eSampler, 1},
     };
 
     const DescriptorPoolCreateInfo pci{
+        .flags         = DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
         .maxSets       = 1,
-        .poolSizeCount = 1,
-        .pPoolSizes    = &ps,
+        .poolSizeCount = 2,
+        .pPoolSizes    = pool_sizes,
     };
 
     out.pool = raii::DescriptorPool{vkctx.device, pci};
@@ -156,21 +157,31 @@ static TextureBinding create_texture_binding(const VulkanContext& vkctx, const T
     raii::DescriptorSets sets{vkctx.device, ai};
     out.set = std::move(sets.front());
 
-    const DescriptorImageInfo img{
-        .sampler     = *tex.sampler,
+    const DescriptorImageInfo image_info{
         .imageView   = *tex.view,
         .imageLayout = ImageLayout::eShaderReadOnlyOptimal,
     };
 
-    const WriteDescriptorSet write{
-        .dstSet          = *out.set,
-        .dstBinding      = 0,
-        .descriptorCount = 1,
-        .descriptorType  = DescriptorType::eCombinedImageSampler,
-        .pImageInfo      = &img,
+    const DescriptorImageInfo sampler_info{
+        .sampler = *tex.sampler,
     };
 
-    vkctx.device.updateDescriptorSets(write, nullptr);
+    const WriteDescriptorSet writes[] = {{
+                                             .dstSet          = *out.set,
+                                             .dstBinding      = 0,
+                                             .descriptorCount = 1,
+                                             .descriptorType  = DescriptorType::eSampledImage,
+                                             .pImageInfo      = &image_info,
+                                         },
+        {
+            .dstSet          = *out.set,
+            .dstBinding      = 1,
+            .descriptorCount = 1,
+            .descriptorType  = DescriptorType::eSampler,
+            .pImageInfo      = &sampler_info,
+        }};
+
+    vkctx.device.updateDescriptorSets(writes, nullptr);
     return out;
 }
 
