@@ -1,57 +1,83 @@
-# Vulkan Visualizer 1.1.1
+# Vulkan Visualizer 1.2.0
 
-A small C++23 + Vulkan 1.3 micro-framework focused on making it easy to prototype renderers using C++ modules and a minimal engine loop.
+A modular C++23 + Vulkan 1.3 framework for rapid prototyping of graphics applications and renderers using a pure C++ module interface.
 
-This repository provides a compact, module-first engine (no public header surface) that sets up a Vulkan device, swapchain (or offscreen targets), a VMA-backed allocator, descriptor pools, and a tiny run loop so you can focus on recording command buffers and composing a UI layer.
+This repository provides a lightweight, module-first graphics toolkit (no public header surface) built on `vulkan-hpp` RAII wrappers. It handles Vulkan context creation, swapchain management, frame synchronization, shader compilation via Slang, and ImGui integration, allowing you to focus on experimenting with rendering techniques.
 
 ## Highlights
-- C++ module-first API (public modules under `module/`) exposing `VulkanEngine`, renderer and UI concepts.
-- Vulkan 1.3 friendly defaults: dynamic rendering, timeline semaphores, descriptor indexing, buffer device address.
-- Flexible presentation: offscreen HDR targets with engine blit, renderer-driven compositing, or direct-to-swapchain rendering.
-- Lightweight descriptor allocator and VMA-backed image allocations.
-- Platform integration via SDL3 for window/events and vk-bootstrap for instance/device selection.
+- **Pure C++ module API** (9 modules under `modules/`) — no traditional headers, export-based interface.
+- **Vulkan 1.3 core features** — dynamic rendering, pipeline barriers 2, RAII resource management via `vulkan-hpp`.
+- **Slang shader compilation** — uses Slang (from Vulkan SDK) for cross-platform shader authoring and SPIR-V generation.
+- **Camera system** — built-in orbit and fly camera with mouse/keyboard input handling.
+- **ImGui integration** — includes docking, viewports, and a mini axis gizmo for visualizing camera orientation.
+- **Geometry toolkit** — procedural mesh generation (sphere, cube) and vertex upload utilities.
+- **Platform windowing** — GLFW 3.4 for window creation and input events.
 
-## What's in this release (v1.1.1)
-- Patch release: documentation refresh and small build compatibility fixes across common CMake/MSVC configurations.
-- Clarified module usage and example in the README.
-- Minor robustness fixes to build scripts and CMake configuration to reduce issues when the system has multiple Vulkan SDK versions installed.
+## What's new in v1.2.0
+- **Architectural overhaul:** Refactored from monolithic engine to modular toolkit approach with 9 independent modules.
+- **Replaced SDL3 with GLFW 3.4** for simplified windowing and broader platform support.
+- **Slang shader compiler integration** — CMake function `add_slang_shader_target()` automates SPIR-V compilation from `.slang` sources.
+- **New camera module (`vk.camera`)** — orbit and fly modes with configurable sensitivity and projection (perspective/orthographic).
+- **Enhanced geometry module (`vk.geometry`)** — typed vertex structures (`VertexP2C4`, `VertexP3C4`, `Vertex`) and procedural mesh generators.
+- **ImGui module (`vk.imgui`)** — streamlined setup with docking/viewports support and mini axis gizmo rendering.
+- **Frame synchronization module (`vk.frame`)** — explicit frames-in-flight management with semaphore/fence tracking.
+- **Math module (`vk.math`)** — shader-compatible vector/matrix types with standard layout guarantees.
+- **Removed VMA** — simplified to manual Vulkan memory allocation for educational clarity.
 
-## Repository layout (important files)
-- `module/` — public C++ module interfaces (engine, context, plugins, toolkit).
-- `src/` — implementation translation units for the engine and context.
-- `shader/` — GLSL shader sources and compiled *.spv artifacts used by tests and examples.
-- `test/` — small integration/unit tests and example applications.
-- `CMakeLists.txt` — top-level build and dependency fetching (FetchContent) for SDL3, vk-bootstrap, VMA.
+## Repository layout
+- `modules/` — Public C++ module interfaces (9 modules):
+  - `vk.camera` — Orbit/fly camera with input handling
+  - `vk.context` — Vulkan instance/device/queue setup
+  - `vk.frame` — Frame-in-flight synchronization system
+  - `vk.geometry` — Vertex types and procedural mesh generation
+  - `vk.imgui` — ImGui initialization and rendering
+  - `vk.math` — Shader-compatible vec2/vec3/vec4/mat4 types
+  - `vk.memory` — Buffer creation and mesh upload utilities
+  - `vk.pipeline` — Graphics pipeline and shader module helpers
+  - `vk.swapchain` — Swapchain creation and depth buffer management
+- `src/` — Implementation translation units (`.cpp`) for each module.
+- `test/` — Example applications demonstrating framework usage.
+- `test/shaders/` — Slang shader sources (`.slang`) compiled to SPIR-V at build time.
+- `CMakeLists.txt` — Top-level build configuration with FetchContent for GLFW and ImGui.
 
-## Minimum requirements
-- CMake 3.26+ recommended (the project uses the experimental module flags; newer CMake versions handle these better).
-- A C++23-capable compiler with basic module support (MSVC in >= VS 2022 17.10+, recent Clang or GCC builds with module TS support).
-- Vulkan SDK 1.3+ available and discoverable (set `VULKAN_SDK` or ensure the SDK is on your PATH).
-- Git/network access for CMake to fetch the third-party sources at configure time.
+## Requirements
+- **CMake 3.28+** — Required for C++23 module support and experimental features.
+- **C++23 compiler** with module support:
+  - MSVC (Visual Studio 2022 17.10+)
+  - Clang 17+ with module support
+  - GCC 14+ (experimental module support)
+- **Vulkan SDK 1.3+** — Must include `slangc` compiler (typically in `$VULKAN_SDK/bin`).
+- **Git** — For CMake FetchContent to download dependencies (GLFW, ImGui).
 
-## Quick build (out-of-tree, default Release)
+## Quick build
 
-On Windows (cmd.exe):
-
+### Windows (cmd.exe)
 ```cmd
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DVK_XAYAH_BUILD_TESTS=ON
 cmake --build build --config Release --parallel
 ```
 
-This creates the static library `vk_vis` (aliased as `vulkan_visualizer::vk_vis`). The build downloads and builds third-party dependencies automatically.
+### Linux/macOS
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DVK_XAYAH_BUILD_TESTS=ON
+cmake --build build --config Release -j
+```
 
-### Using it from another project
+This builds the static library `vk-core` (aliased as `vk-core::vk-core`). The build automatically downloads and compiles GLFW and ImGui via FetchContent. When `VK_XAYAH_BUILD_TESTS=ON`, it also compiles Slang shaders and builds test executables.
+
+### Using in your project
 Add this repository as a subdirectory and link against the exported target:
 ```cmake
 add_subdirectory(vulkan-visualizer)
-add_executable(demo main.cpp)
-target_link_libraries(demo PRIVATE vulkan_visualizer::vk_vis)
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE vk-core::vk-core)
 ```
 
 ## Notes and tips
-- If your compiler reports module-related warnings or errors, try a newer toolchain or adjust the CMake generator (Ninja vs Visual Studio) — the project is tested primarily with a modern MSVC toolchain and Ninja.
-- Precompiled SPIR-V shaders are kept in `shader/`. If you modify GLSL sources, regenerate SPV files using glslangValidator or your preferred tool.
-- The CMake configuration includes small helpers for selecting the Vulkan SDK; if you have multiple SDKs installed, explicitly set `VULKAN_SDK` in your environment before running CMake.
+- **Module support:** If your compiler reports module-related warnings or errors, try a newer toolchain or adjust the CMake generator (Ninja vs Visual Studio). The project is tested primarily with MSVC 2022 and Ninja.
+- **Slang compiler:** The build requires `slangc` from the Vulkan SDK. Ensure your `VULKAN_SDK` environment variable is set correctly or that `slangc` is in your PATH.
+- **Shader compilation:** Slang shaders in `test/shaders/*.slang` are automatically compiled to SPIR-V at build time and placed in `build/shaders/`.
+- **Multiple Vulkan SDKs:** If you have multiple SDKs installed, explicitly set the `VULKAN_SDK` environment variable before running CMake to select the correct version.
 
 ## Quick start (clear the swapchain)
 This minimal example renders a solid color directly to the swapchain. It uses a no-op UI system and a renderer that only issues a clear.
