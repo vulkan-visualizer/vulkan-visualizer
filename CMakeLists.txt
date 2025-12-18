@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 project(vulkan_visualizer VERSION 1.2.0 LANGUAGES CXX)
 
+option(VK_XAYAH_BUILD_APP "Build the Vulkan Visualizer application" ON)
 option(VK_XAYAH_BUILD_TESTS "Build the Vulkan Visualizer tests" OFF)
 
 # ============================================================================
@@ -148,6 +149,7 @@ function(add_slang_shader_target)
 endfunction()
 
 file(GLOB SHADER_SLANG_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/app/shaders/*.slang
         ${CMAKE_CURRENT_SOURCE_DIR}/test/shaders/*.slang
 )
 
@@ -155,6 +157,21 @@ add_slang_shader_target(
         TARGET vk_slang_shaders
         SOURCES ${SHADER_SLANG_SOURCES}
 )
+
+# ============================================================================
+# APP
+# ============================================================================
+if (VK_XAYAH_BUILD_APP)
+    add_executable(vk-app)
+    target_sources(vk-app
+            PRIVATE
+            app/vk.app.cpp
+            PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
+            app/vk.app.ixx
+    )
+    target_link_libraries(vk-app PRIVATE vk-core::vk-core)
+    add_dependencies(vk-app vk_slang_shaders)
+endif ()
 
 
 # ============================================================================
