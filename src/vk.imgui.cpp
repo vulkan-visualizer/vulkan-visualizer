@@ -143,53 +143,66 @@ namespace vk::imgui {
         draw_list->AddCircleFilled(center, size * 0.5f, IM_COL32(30, 32, 36, 180), 48);
         draw_list->AddCircle(center, size * 0.5f, IM_COL32(255, 255, 255, 60), 48, 1.5f);
 
+        const math::vec3 cam_right{c2w.c0.x, c2w.c0.y, c2w.c0.z, 0.0f};
+        const math::vec3 cam_up{c2w.c1.x, c2w.c1.y, c2w.c1.z, 0.0f};
+        const math::vec3 cam_forward{c2w.c2.x, c2w.c2.y, c2w.c2.z, 0.0f};
+
         struct Axis {
             math::vec3 world_dir;
             ImU32 color;
             const char* label;
         };
 
-        const math::vec3 cam_right{c2w.c0.x, c2w.c0.y, c2w.c0.z, 0.0f};
-        const math::vec3 cam_up{c2w.c1.x, c2w.c1.y, c2w.c1.z, 0.0f};
-        const math::vec3 cam_forward{c2w.c2.x, c2w.c2.y, c2w.c2.z, 0.0f};
-
-        const Axis axes[3] = {
-            {cam_right, IM_COL32(255, 80, 80, 255), "X"},
-            {cam_up, IM_COL32(80, 255, 80, 255), "Y"},
-            {cam_forward, IM_COL32(100, 140, 255, 255), "Z"},
+        constexpr Axis axes[3] = {
+            {math::vec3{1, 0, 0, 0}, IM_COL32(255, 80, 80, 255), "X"},
+            {math::vec3{0, 1, 0, 0}, IM_COL32(80, 255, 80, 255), "Y"},
+            {math::vec3{0, 0, 1, 0}, IM_COL32(100, 140, 255, 255), "Z"},
         };
 
         struct ProjectedAxis {
-            float sx, sy, sz;
+            math::vec3 v;
             Axis axis;
         };
 
-        ProjectedAxis proj[3];
+        ProjectedAxis p[3];
 
         for (int i = 0; i < 3; ++i) {
-            const auto& w = axes[i].world_dir;
-            proj[i]       = {dot(w, cam_right), dot(w, cam_up), dot(w, cam_forward), axes[i]};
+            const math::vec3 d = vk::math::normalize(axes[i].world_dir);
+
+            const float x = vk::math::dot(d, cam_right);
+            const float y = vk::math::dot(d, cam_up);
+            const float z = vk::math::dot(d, cam_forward);
+
+            p[i] = {vk::math::normalize(math::vec3{x, y, z, 0.0f}), axes[i]};
         }
 
         auto draw_axis = [&](const ProjectedAxis& a, bool back) {
             const float thickness = back ? 2.0f : 3.0f;
-            ImU32 color           = a.axis.color;
-            if (back) color = (color & 0x00FFFFFFu) | (120u << 24);
 
-            const ImVec2 end(center.x + a.sx * radius, center.y - a.sy * radius);
+            ImU32 color = a.axis.color;
+            if (back) {
+                color = IM_COL32((color >> IM_COL32_R_SHIFT) & 0xFF, (color >> IM_COL32_G_SHIFT) & 0xFF, (color >> IM_COL32_B_SHIFT) & 0xFF, 120);
+            }
+
+            const ImVec2 end(center.x + a.v.x * radius, center.y - a.v.y * radius);
 
             draw_list->AddLine(center, end, color, thickness);
             draw_list->AddCircleFilled(end, back ? 3.0f : 4.5f, color, 12);
 
             if (!back) {
-                draw_list->AddText(ImVec2(end.x + (a.sx >= 0 ? 8.0f : -20.0f), end.y + (a.sy >= 0 ? -18.0f : 4.0f)), color, a.axis.label);
+                const float ox = a.v.x >= 0.0f ? 8.0f : -20.0f;
+                const float oy = a.v.y >= 0.0f ? -18.0f : 4.0f;
+                draw_list->AddText(ImVec2(end.x + ox, end.y + oy), color, a.axis.label);
             }
         };
 
-        for (const auto& a : proj)
-            if (a.sz > 0.0f) draw_axis(a, true);
+        constexpr float eps = 1e-4f;
 
-        for (const auto& a : proj)
-            if (a.sz <= 0.0f) draw_axis(a, false);
+        for (const auto& a : p) {
+            if (a.v.z > eps) draw_axis(a, true);
+        }
+        for (const auto& a : p) {
+            if (a.v.z <= eps) draw_axis(a, false);
+        }
     }
 } // namespace vk::imgui

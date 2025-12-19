@@ -57,57 +57,102 @@ namespace vk::camera {
         math::vec3 right;
         math::vec3 up;
         math::vec3 forward;
-        math::vec3 z_axis;
     };
 
-    static Frame make_view_frame(const Convention& conv, math::vec3 forward_world) noexcept {
+    static Frame make_geometric_frame(const Convention& conv, math::vec3 forward_world) noexcept {
         forward_world = normalized_or_fallback(forward_world, {0.0f, 0.0f, -1.0f, 0.0f});
 
         math::vec3 up_hint = axis_dir_to_vec3(conv.world_up);
 
+        math::vec3 right{};
+        math::vec3 up{};
+
         if (conv.handedness == Handedness::Right) {
-            math::vec3 right = vk::math::cross(forward_world, up_hint);
-            right            = normalized_or_fallback(right, {1.0f, 0.0f, 0.0f, 0.0f});
-            math::vec3 up    = vk::math::cross(right, forward_world);
-            up               = normalized_or_fallback(up, up_hint);
-
-            const math::vec3 z_axis = (conv.view_forward.sign == Sign::Negative) ? vk::math::mul(forward_world, -1.0f) : forward_world;
-
-            return {right, up, forward_world, z_axis};
+            right = vk::math::cross(forward_world, up_hint);
+            right = normalized_or_fallback(right, {1.0f, 0.0f, 0.0f, 0.0f});
+            up    = vk::math::cross(right, forward_world);
         } else {
-            math::vec3 right = vk::math::cross(up_hint, forward_world);
-            right            = normalized_or_fallback(right, {1.0f, 0.0f, 0.0f, 0.0f});
-            math::vec3 up    = vk::math::cross(forward_world, right);
-            up               = normalized_or_fallback(up, up_hint);
-
-            const math::vec3 z_axis = (conv.view_forward.sign == Sign::Negative) ? vk::math::mul(forward_world, -1.0f) : forward_world;
-
-            return {right, up, forward_world, z_axis};
+            right = vk::math::cross(up_hint, forward_world);
+            right = normalized_or_fallback(right, {1.0f, 0.0f, 0.0f, 0.0f});
+            up    = vk::math::cross(forward_world, right);
         }
+
+        up = normalized_or_fallback(up, up_hint);
+
+        return {right, up, forward_world};
     }
 
-    static math::mat4 make_w2c(math::vec3 eye, const Frame& f) noexcept {
+    static void build_basis_world_for_view_axes(const Convention& conv, const Frame& f, math::vec3& out_x, math::vec3& out_y, math::vec3& out_z) noexcept {
+        math::vec3 bx{};
+        math::vec3 by{};
+        math::vec3 bz{};
+
+        const math::vec3 up_world = f.up;
+        by                        = up_world;
+
+        if (conv.view_forward.axis == Axis::Y) {
+            const math::vec3 z_fallback = normalized_or_fallback(vk::math::cross(f.right, f.up), {0.0f, 0.0f, 1.0f, 0.0f});
+            bz                          = z_fallback;
+            if (conv.handedness == Handedness::Right) {
+                bx = normalized_or_fallback(vk::math::cross(by, bz), {1.0f, 0.0f, 0.0f, 0.0f});
+            } else {
+                bx = normalized_or_fallback(vk::math::cross(bz, by), {1.0f, 0.0f, 0.0f, 0.0f});
+            }
+            out_x = bx;
+            out_y = by;
+            out_z = bz;
+            return;
+        }
+
+        const float s                       = (conv.view_forward.sign == Sign::Positive) ? 1.0f : -1.0f;
+        const math::vec3 axis_forward_world = mul3(f.forward, s);
+
+        if (conv.view_forward.axis == Axis::Z) {
+            bz = axis_forward_world;
+            if (conv.handedness == Handedness::Right) {
+                bx = normalized_or_fallback(vk::math::cross(by, bz), {1.0f, 0.0f, 0.0f, 0.0f});
+                by = normalized_or_fallback(vk::math::cross(bz, bx), by);
+            } else {
+                bx = normalized_or_fallback(vk::math::cross(bz, by), {1.0f, 0.0f, 0.0f, 0.0f});
+                by = normalized_or_fallback(vk::math::cross(bx, bz), by);
+            }
+        } else {
+            bx = axis_forward_world;
+            if (conv.handedness == Handedness::Right) {
+                bz = normalized_or_fallback(vk::math::cross(bx, by), {0.0f, 0.0f, 1.0f, 0.0f});
+                by = normalized_or_fallback(vk::math::cross(bz, bx), by);
+            } else {
+                bz = normalized_or_fallback(vk::math::cross(by, bx), {0.0f, 0.0f, 1.0f, 0.0f});
+                by = normalized_or_fallback(vk::math::cross(bx, bz), by);
+            }
+        }
+
+        out_x = bx;
+        out_y = by;
+        out_z = bz;
+    }
+
+    static math::mat4 make_w2c(math::vec3 eye, math::vec3 bx, math::vec3 by, math::vec3 bz) noexcept {
         math::mat4 m{};
 
-        m.c0 = {f.right.x, f.up.x, f.z_axis.x, 0.0f};
-        m.c1 = {f.right.y, f.up.y, f.z_axis.y, 0.0f};
-        m.c2 = {f.right.z, f.up.z, f.z_axis.z, 0.0f};
+        m.c0 = {bx.x, by.x, bz.x, 0.0f};
+        m.c1 = {bx.y, by.y, bz.y, 0.0f};
+        m.c2 = {bx.z, by.z, bz.z, 0.0f};
 
-        const float tx = -vk::math::dot(f.right, eye);
-        const float ty = -vk::math::dot(f.up, eye);
-        const float tz = -vk::math::dot(f.z_axis, eye);
+        const float tx = -vk::math::dot(bx, eye);
+        const float ty = -vk::math::dot(by, eye);
+        const float tz = -vk::math::dot(bz, eye);
 
         m.c3 = {tx, ty, tz, 1.0f};
-
         return m;
     }
 
-    static math::mat4 make_c2w(math::vec3 eye, const Frame& f) noexcept {
+    static math::mat4 make_c2w(math::vec3 eye, math::vec3 bx, math::vec3 by, math::vec3 bz) noexcept {
         math::mat4 m{};
 
-        m.c0 = {f.right.x, f.right.y, f.right.z, 0.0f};
-        m.c1 = {f.up.x, f.up.y, f.up.z, 0.0f};
-        m.c2 = {f.z_axis.x, f.z_axis.y, f.z_axis.z, 0.0f};
+        m.c0 = {bx.x, bx.y, bx.z, 0.0f};
+        m.c1 = {by.x, by.y, by.z, 0.0f};
+        m.c2 = {bz.x, bz.y, bz.z, 0.0f};
         m.c3 = {eye.x, eye.y, eye.z, 1.0f};
 
         return m;
@@ -160,9 +205,11 @@ namespace vk::camera {
     const CameraConfig& Camera::config() const noexcept {
         return cfg_;
     }
+
     const CameraState& Camera::state() const noexcept {
         return st_;
     }
+
     const CameraMatrices& Camera::matrices() const noexcept {
         return m_;
     }
@@ -211,8 +258,7 @@ namespace vk::camera {
 
         if (houdini && in.mmb) {
             const float base = (cfg_.projection == Projection::Orthographic) ? std::max(1e-4f, cfg_.ortho_height) : std::max(1e-4f, st_.orbit.distance);
-
-            const float pan = base * cfg_.orbit_pan_sens;
+            const float pan  = base * cfg_.orbit_pan_sens;
 
             const float sx  = float(vw);
             const float sy  = float(vh);
@@ -221,10 +267,10 @@ namespace vk::camera {
 
             const math::vec3 up = axis_dir_to_vec3(cfg_.convention.world_up);
 
-            const math::vec3 base_forward = axis_dir_to_vec3(cfg_.convention.view_forward);
-            const math::vec3 base_look    = (cfg_.convention.view_forward.sign == Sign::Negative) ? vk::math::mul(base_forward, -1.0f) : base_forward;
+            const math::vec3 local_forward = axis_dir_to_vec3(cfg_.convention.view_forward);
 
-            math::vec3 look  = rotate_axis_angle(base_look, up, st_.orbit.yaw_rad);
+            math::vec3 look = rotate_axis_angle(local_forward, up, st_.orbit.yaw_rad);
+
             math::vec3 right = (cfg_.convention.handedness == Handedness::Right) ? vk::math::cross(look, up) : vk::math::cross(up, look);
             right            = normalized_or_fallback(right, {1.0f, 0.0f, 0.0f, 0.0f});
 
@@ -258,18 +304,16 @@ namespace vk::camera {
 
         const float move = speed * dt;
 
-        const math::vec3 up = axis_dir_to_vec3(cfg_.convention.world_up);
+        const math::vec3 up            = axis_dir_to_vec3(cfg_.convention.world_up);
+        const math::vec3 local_forward = axis_dir_to_vec3(cfg_.convention.view_forward);
 
-        const math::vec3 base_forward = axis_dir_to_vec3(cfg_.convention.view_forward);
-        const math::vec3 base_look    = (cfg_.convention.view_forward.sign == Sign::Negative) ? vk::math::mul(base_forward, -1.0f) : base_forward;
-
-        math::vec3 look = rotate_axis_angle(base_look, up, st_.fly.yaw_rad);
+        math::vec3 look = rotate_axis_angle(local_forward, up, st_.fly.yaw_rad);
 
         math::vec3 right = (cfg_.convention.handedness == Handedness::Right) ? vk::math::cross(look, up) : vk::math::cross(up, look);
         right            = normalized_or_fallback(right, {1.0f, 0.0f, 0.0f, 0.0f});
 
         look = rotate_axis_angle(look, right, st_.fly.pitch_rad);
-        look = normalized_or_fallback(look, base_look);
+        look = normalized_or_fallback(look, local_forward);
 
         math::vec3 final_right = (cfg_.convention.handedness == Handedness::Right) ? vk::math::cross(look, up) : vk::math::cross(up, look);
         final_right            = normalized_or_fallback(final_right, right);
@@ -286,38 +330,37 @@ namespace vk::camera {
     }
 
     void Camera::recompute_matrices() noexcept {
-        const math::vec3 up = axis_dir_to_vec3(cfg_.convention.world_up);
+        const math::vec3 up_world = axis_dir_to_vec3(cfg_.convention.world_up);
+        (void) up_world;
 
         math::vec3 eye{};
         math::vec3 forward_world{};
 
         if (st_.mode == Mode::Orbit) {
-            const math::vec3 base_forward = axis_dir_to_vec3(cfg_.convention.view_forward);
-            const math::vec3 base_look    = (cfg_.convention.view_forward.sign == Sign::Negative) ? vk::math::mul(base_forward, -1.0f) : base_forward;
+            const math::vec3 local_forward = axis_dir_to_vec3(cfg_.convention.view_forward);
 
-            math::vec3 look = rotate_axis_angle(base_look, up, st_.orbit.yaw_rad);
+            math::vec3 look = rotate_axis_angle(local_forward, axis_dir_to_vec3(cfg_.convention.world_up), st_.orbit.yaw_rad);
 
-            math::vec3 right = (cfg_.convention.handedness == Handedness::Right) ? vk::math::cross(look, up) : vk::math::cross(up, look);
+            math::vec3 right = (cfg_.convention.handedness == Handedness::Right) ? vk::math::cross(look, axis_dir_to_vec3(cfg_.convention.world_up)) : vk::math::cross(axis_dir_to_vec3(cfg_.convention.world_up), look);
             right            = normalized_or_fallback(right, {1.0f, 0.0f, 0.0f, 0.0f});
 
             look = rotate_axis_angle(look, right, st_.orbit.pitch_rad);
-            look = normalized_or_fallback(look, base_look);
+            look = normalized_or_fallback(look, local_forward);
 
             forward_world = look;
             eye           = sub3(st_.orbit.target, mul3(forward_world, st_.orbit.distance));
 
             m_.eye = eye;
         } else {
-            const math::vec3 base_forward = axis_dir_to_vec3(cfg_.convention.view_forward);
-            const math::vec3 base_look    = (cfg_.convention.view_forward.sign == Sign::Negative) ? vk::math::mul(base_forward, -1.0f) : base_forward;
+            const math::vec3 local_forward = axis_dir_to_vec3(cfg_.convention.view_forward);
 
-            math::vec3 look = rotate_axis_angle(base_look, up, st_.fly.yaw_rad);
+            math::vec3 look = rotate_axis_angle(local_forward, axis_dir_to_vec3(cfg_.convention.world_up), st_.fly.yaw_rad);
 
-            math::vec3 right = (cfg_.convention.handedness == Handedness::Right) ? vk::math::cross(look, up) : vk::math::cross(up, look);
+            math::vec3 right = (cfg_.convention.handedness == Handedness::Right) ? vk::math::cross(look, axis_dir_to_vec3(cfg_.convention.world_up)) : vk::math::cross(axis_dir_to_vec3(cfg_.convention.world_up), look);
             right            = normalized_or_fallback(right, {1.0f, 0.0f, 0.0f, 0.0f});
 
             look = rotate_axis_angle(look, right, st_.fly.pitch_rad);
-            look = normalized_or_fallback(look, base_look);
+            look = normalized_or_fallback(look, local_forward);
 
             forward_world = look;
             eye           = st_.fly.eye;
@@ -325,14 +368,21 @@ namespace vk::camera {
             m_.eye = eye;
         }
 
-        const Frame f = make_view_frame(cfg_.convention, forward_world);
+        const Frame f = make_geometric_frame(cfg_.convention, forward_world);
 
-        m_.right   = f.right;
-        m_.up      = f.up;
         m_.forward = f.forward;
 
-        m_.w2c = make_w2c(eye, f);
-        m_.c2w = make_c2w(eye, f);
+        math::vec3 bx{};
+        math::vec3 by{};
+        math::vec3 bz{};
+
+        build_basis_world_for_view_axes(cfg_.convention, f, bx, by, bz);
+
+        m_.right = bx;
+        m_.up    = by;
+
+        m_.w2c = make_w2c(eye, bx, by, bz);
+        m_.c2w = make_c2w(eye, bx, by, bz);
 
         m_.view_proj = vk::math::mul(m_.proj, m_.w2c);
     }
