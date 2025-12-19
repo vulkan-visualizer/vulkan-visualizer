@@ -5,6 +5,26 @@ import std;
 
 namespace vk::camera {
 
+    // -------------------------------------------------------------------------
+    // High-level behavior
+    // -------------------------------------------------------------------------
+    //
+    // This module provides a camera controller and the matrices required by a
+    // renderer:
+    //   - w2c (view matrix), c2w (inverse view)
+    //   - proj (Vulkan-style projection), view_proj
+    //   - eye/right/up/forward vectors in world space
+    //
+    // It supports two common interaction modes:
+    //   - Orbit: camera orbits around a target point with yaw/pitch + distance
+    //   - Fly  : free-fly (FPS-style) with yaw/pitch + positional movement
+    //
+    // A key feature is "Convention": you can define which axis is "world up",
+    // which axis is "view forward", and the handedness. This is useful when you
+    // want the same camera code to work across datasets/tools (Blender, COLMAP,
+    // DCCs, etc.) while still outputting a consistent engine-space camera.
+    // -------------------------------------------------------------------------
+
     export enum class Mode : std::uint8_t { Orbit, Fly };
     export enum class Projection : std::uint8_t { Perspective, Orthographic };
 
@@ -19,7 +39,14 @@ namespace vk::camera {
 
     export struct Convention {
         Handedness handedness{Handedness::Right};
+
+        // World "up" direction. Example:
+        //   - Y+ for many engines
+        //   - Z+ for Blender
         AxisDir world_up{Axis::Y, Sign::Positive};
+
+        // The camera's "forward" axis in view space, expressed as an axis+sign.
+        // Many engines use -Z forward (OpenGL-style), some use +Z.
         AxisDir view_forward{Axis::Z, Sign::Negative};
     };
 
@@ -27,16 +54,20 @@ namespace vk::camera {
         Projection projection = Projection::Perspective;
         Convention convention{};
 
+        // Perspective projection parameters (Vulkan clip space).
         float fov_y_rad = std::numbers::pi_v<float> / 3.0f;
         float znear     = 0.01f;
         float zfar      = 1000.0f;
 
+        // Orthographic size control: height of the view volume at the camera.
         float ortho_height = 5.0f;
 
+        // Orbit tuning.
         float orbit_rotate_sens = 0.0065f;
         float orbit_pan_sens    = 0.0015f;
         float orbit_zoom_sens   = 0.12f;
 
+        // Fly tuning.
         float fly_look_sens = 0.0045f;
         float fly_speed     = 2.0f;
         float fly_shift_mul = 3.5f;
@@ -63,14 +94,17 @@ namespace vk::camera {
     };
 
     export struct CameraInput {
+        // Mouse buttons.
         bool lmb = false;
         bool mmb = false;
         bool rmb = false;
 
+        // Per-frame deltas (already accumulated by the app).
         float mouse_dx = 0.0f;
         float mouse_dy = 0.0f;
         float scroll   = 0.0f;
 
+        // Movement intents.
         bool forward  = false;
         bool backward = false;
         bool left     = false;
@@ -78,6 +112,7 @@ namespace vk::camera {
         bool up       = false;
         bool down     = false;
 
+        // Modifiers (app-defined meaning).
         bool shift = false;
         bool ctrl  = false;
         bool alt   = false;
@@ -93,6 +128,8 @@ namespace vk::camera {
 
         math::vec3 eye{0.0f, 0.0f, 0.0f, 0.0f};
 
+        // World-space camera basis vectors.
+        // right/up/forward correspond to view axes X/Y/Z after applying Convention.
         math::vec3 right{1.0f, 0.0f, 0.0f, 0.0f};
         math::vec3 up{0.0f, 1.0f, 0.0f, 0.0f};
         math::vec3 forward{0.0f, 0.0f, -1.0f, 0.0f};
@@ -107,12 +144,24 @@ namespace vk::camera {
 
         void set_mode(Mode m) noexcept;
         void set_projection(Projection p) noexcept;
-
         void set_convention(const Convention& c) noexcept;
+
+        // Reset to a reasonable default pose for both Orbit and Fly.
         void home() noexcept;
 
+        // Update controller state, then rebuild matrices.
         void update(float dt_sec, std::uint32_t viewport_w, std::uint32_t viewport_h, const CameraInput& input) noexcept;
 
+        // Consume an external camera-to-world and adopt it as the current pose.
+        // This is useful for datasets (e.g., NeRF/SLAM) that provide c2w.
+        //
+        // Current behavior:
+        //   - A small, explicit "Blender-like" world remap is supported
+        //   - Otherwise treated as already in engine world axes
+        //
+        // If you want fully general conversion between arbitrary conventions,
+        // tell me what "external convention" precisely means for your datasets
+        // (especially: does it describe world axes only, or also view forward?).
         void set_from_external_c2w(const math::mat4& external_c2w, const Convention& external_convention, bool reset_mode = true) noexcept;
 
         [[nodiscard]] const CameraConfig& config() const noexcept;
@@ -120,15 +169,18 @@ namespace vk::camera {
         [[nodiscard]] const CameraMatrices& matrices() const noexcept;
 
     private:
-        void update_orbit(float dt, const CameraInput& in, std::uint32_t vw, std::uint32_t vh) noexcept;
-        void update_fly(float dt, const CameraInput& in) noexcept;
+        // Controller steps: mutate st_ only.
+        void step_orbit_(const CameraInput& in, std::uint32_t vw, std::uint32_t vh) noexcept;
+        void step_fly_(float dt, const CameraInput& in) noexcept;
 
-        void update_projection(std::uint32_t w, std::uint32_t h) noexcept;
-        void recompute_matrices() noexcept;
+        // Rebuild derived data: projection + view matrices + basis vectors.
+        void rebuild_projection_(std::uint32_t w, std::uint32_t h) noexcept;
+        void rebuild_matrices_() noexcept;
 
-        void set_pose_from_engine_c2w_(const math::mat4& c2w_engine) noexcept;
+        // Adopt a c2w that is already in engine world axes.
+        void adopt_engine_c2w_(const math::mat4& c2w_engine) noexcept;
 
-        static float clamp_pitch(float x) noexcept;
+        static float clamp_pitch_(float rad) noexcept;
 
         CameraConfig cfg_{};
         CameraState st_{};

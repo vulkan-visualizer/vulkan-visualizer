@@ -5,277 +5,281 @@ import std;
 
 namespace vk::camera {
 
-    static float clampf(float x, float a, float b) noexcept {
-        if (x < a) return a;
-        if (x > b) return b;
-        return x;
-    }
+    namespace detail {
 
-    float Camera::clamp_pitch(float x) noexcept {
-        constexpr float lim = 1.55334303427f;
-        return clampf(x, -lim, lim);
-    }
+        // -------------------------
+        // Small scalar helpers
+        // -------------------------
 
-    static math::vec3 axis_dir_to_vec3(const AxisDir d) noexcept {
-        const float s = (d.sign == Sign::Positive) ? 1.0f : -1.0f;
-        switch (d.axis) {
-        case Axis::X: return {s, 0.0f, 0.0f, 0.0f};
-        case Axis::Y: return {0.0f, s, 0.0f, 0.0f};
-        case Axis::Z: return {0.0f, 0.0f, s, 0.0f};
+        constexpr float pitch_limit_rad = 1.55334303427f;
+
+        [[nodiscard]] inline float clampf(float x, float a, float b) noexcept {
+            if (x < a) return a;
+            if (x > b) return b;
+            return x;
         }
-        return {0.0f, 0.0f, 0.0f, 0.0f};
-    }
 
-    static math::vec3 add3(math::vec3 a, math::vec3 b) noexcept {
-        return vk::math::add(a, b);
-    }
-    static math::vec3 sub3(math::vec3 a, math::vec3 b) noexcept {
-        return vk::math::sub(a, b);
-    }
-    static math::vec3 mul3(math::vec3 v, float s) noexcept {
-        return vk::math::mul(v, s);
-    }
+        [[nodiscard]] inline float safe_aspect(std::uint32_t w, std::uint32_t h) noexcept {
+            const float fw = float(w ? w : 1);
+            const float fh = float(h ? h : 1);
+            return fw / fh;
+        }
 
-    static math::vec3 normalized_or_fallback(math::vec3 v, math::vec3 fallback) noexcept {
-        const float len = vk::math::length(v);
-        if (len > 1e-8f) return vk::math::mul(v, 1.0f / len);
-        return fallback;
-    }
+        // -------------------------
+        // vec3 helpers (vk.math is assumed minimal)
+        // -------------------------
 
-    static math::vec3 rotate_axis_angle(math::vec3 v, math::vec3 axis_unit, float rad) noexcept {
-        const float c = std::cos(rad);
-        const float s = std::sin(rad);
+        [[nodiscard]] inline math::vec3 add3(math::vec3 a, math::vec3 b) noexcept {
+            return vk::math::add(a, b);
+        }
+        [[nodiscard]] inline math::vec3 sub3(math::vec3 a, math::vec3 b) noexcept {
+            return vk::math::sub(a, b);
+        }
+        [[nodiscard]] inline math::vec3 mul3(math::vec3 v, float s) noexcept {
+            return vk::math::mul(v, s);
+        }
 
-        const math::vec3 term1 = mul3(v, c);
-        const math::vec3 term2 = mul3(vk::math::cross(axis_unit, v), s);
-        const math::vec3 term3 = mul3(axis_unit, vk::math::dot(axis_unit, v) * (1.0f - c));
+        [[nodiscard]] inline math::vec3 normalized_or(math::vec3 v, math::vec3 fallback) noexcept {
+            const float len = vk::math::length(v);
+            if (len > 1e-8f) return vk::math::mul(v, 1.0f / len);
+            return fallback;
+        }
 
-        return add3(add3(term1, term2), term3);
-    }
+        // Rodrigues rotation around a unit axis.
+        [[nodiscard]] inline math::vec3 rotate_axis_angle(math::vec3 v, math::vec3 axis_unit, float rad) noexcept {
+            const float c = std::cos(rad);
+            const float s = std::sin(rad);
 
-    static math::vec4 mul_mat4_vec4(const math::mat4& m, const math::vec4& v) noexcept {
-        return {
-            m.c0.x * v.x + m.c1.x * v.y + m.c2.x * v.z + m.c3.x * v.w,
-            m.c0.y * v.x + m.c1.y * v.y + m.c2.y * v.z + m.c3.y * v.w,
-            m.c0.z * v.x + m.c1.z * v.y + m.c2.z * v.z + m.c3.z * v.w,
-            m.c0.w * v.x + m.c1.w * v.y + m.c2.w * v.z + m.c3.w * v.w,
+            const math::vec3 term1 = mul3(v, c);
+            const math::vec3 term2 = mul3(vk::math::cross(axis_unit, v), s);
+            const math::vec3 term3 = mul3(axis_unit, vk::math::dot(axis_unit, v) * (1.0f - c));
+
+            return add3(add3(term1, term2), term3);
+        }
+
+        // -------------------------
+        // Convention helpers
+        // -------------------------
+
+        [[nodiscard]] inline math::vec3 axis_dir_to_vec3(AxisDir d) noexcept {
+            const float s = (d.sign == Sign::Positive) ? 1.0f : -1.0f;
+            switch (d.axis) {
+            case Axis::X: return {s, 0.0f, 0.0f, 0.0f};
+            case Axis::Y: return {0.0f, s, 0.0f, 0.0f};
+            case Axis::Z: return {0.0f, 0.0f, s, 0.0f};
+            }
+            return {0.0f, 0.0f, 0.0f, 0.0f};
+        }
+
+        struct Basis {
+            // World-space basis corresponding to view-space axes X/Y/Z after Convention mapping.
+            math::vec3 x;
+            math::vec3 y;
+            math::vec3 z;
         };
-    }
 
-    static math::mat4 mul_mat4(const math::mat4& a, const math::mat4& b) noexcept {
-        math::mat4 r{};
-        r.c0 = mul_mat4_vec4(a, b.c0);
-        r.c1 = mul_mat4_vec4(a, b.c1);
-        r.c2 = mul_mat4_vec4(a, b.c2);
-        r.c3 = mul_mat4_vec4(a, b.c3);
-        return r;
-    }
+        // Build a stable, orthonormal frame from a desired forward direction and a world-up hint.
+        // This is geometric (world) and does NOT yet apply "which view axis is forward".
+        struct Frame {
+            math::vec3 right;
+            math::vec3 up;
+            math::vec3 forward;
+        };
 
-    static math::mat4 transpose3x3(const math::mat4& m) noexcept {
-        math::mat4 t = m;
-        std::swap(t.c0.y, t.c1.x);
-        std::swap(t.c0.z, t.c2.x);
-        std::swap(t.c1.z, t.c2.y);
-        return t;
-    }
+        [[nodiscard]] inline Frame make_geometric_frame(const Convention& conv, math::vec3 forward_world) noexcept {
+            forward_world = normalized_or(forward_world, {0.0f, 0.0f, -1.0f, 0.0f});
 
-    static math::mat4 make_world_axis_remap_blender_to_vk() noexcept {
-        math::mat4 m{};
-        m.c0 = {1.0f, 0.0f, 0.0f, 0.0f};
-        m.c1 = {0.0f, 0.0f, 1.0f, 0.0f};
-        m.c2 = {0.0f, -1.0f, 0.0f, 0.0f};
-        m.c3 = {0.0f, 0.0f, 0.0f, 1.0f};
-        return m;
-    }
+            math::vec3 up_hint = axis_dir_to_vec3(conv.world_up);
+            up_hint            = normalized_or(up_hint, {0.0f, 1.0f, 0.0f, 0.0f});
 
-    static math::mat4 make_camera_basis_local_axes(const Convention& c) noexcept {
-        const math::vec3 up_hint = axis_dir_to_vec3(c.world_up);
-        const math::vec3 fwd     = axis_dir_to_vec3(c.view_forward);
+            math::vec3 right{};
+            math::vec3 up{};
 
-        math::vec3 forward = normalized_or_fallback(fwd, {0.0f, 0.0f, -1.0f, 0.0f});
-        math::vec3 up      = normalized_or_fallback(up_hint, {0.0f, 1.0f, 0.0f, 0.0f});
-
-        math::vec3 right{};
-        if (c.handedness == Handedness::Right) {
-            right = vk::math::cross(forward, up);
-            right = normalized_or_fallback(right, {1.0f, 0.0f, 0.0f, 0.0f});
-            up    = normalized_or_fallback(vk::math::cross(right, forward), up);
-        } else {
-            right = vk::math::cross(up, forward);
-            right = normalized_or_fallback(right, {1.0f, 0.0f, 0.0f, 0.0f});
-            up    = normalized_or_fallback(vk::math::cross(forward, right), up);
-        }
-
-        math::mat4 b{};
-        b.c0 = {right.x, right.y, right.z, 0.0f};
-        b.c1 = {up.x, up.y, up.z, 0.0f};
-        b.c2 = {forward.x, forward.y, forward.z, 0.0f};
-        b.c3 = {0.0f, 0.0f, 0.0f, 1.0f};
-        return b;
-    }
-
-    struct Frame {
-        math::vec3 right;
-        math::vec3 up;
-        math::vec3 forward;
-    };
-
-    static Frame make_geometric_frame(const Convention& conv, math::vec3 forward_world) noexcept {
-        forward_world      = normalized_or_fallback(forward_world, {0.0f, 0.0f, -1.0f, 0.0f});
-        math::vec3 up_hint = axis_dir_to_vec3(conv.world_up);
-
-        math::vec3 right{};
-        math::vec3 up{};
-
-        if (conv.handedness == Handedness::Right) {
-            right = vk::math::cross(forward_world, up_hint);
-            right = normalized_or_fallback(right, {1.0f, 0.0f, 0.0f, 0.0f});
-            up    = vk::math::cross(right, forward_world);
-        } else {
-            right = vk::math::cross(up_hint, forward_world);
-            right = normalized_or_fallback(right, {1.0f, 0.0f, 0.0f, 0.0f});
-            up    = vk::math::cross(forward_world, right);
-        }
-
-        up = normalized_or_fallback(up, up_hint);
-        return {right, up, forward_world};
-    }
-
-    static void build_basis_world_for_view_axes(const Convention& conv, const Frame& f, math::vec3& out_x, math::vec3& out_y, math::vec3& out_z) noexcept {
-        math::vec3 bx{};
-        math::vec3 by{};
-        math::vec3 bz{};
-
-        by = f.up;
-
-        if (conv.view_forward.axis == Axis::Y) {
-            bz = normalized_or_fallback(vk::math::cross(f.right, f.up), {0.0f, 0.0f, 1.0f, 0.0f});
             if (conv.handedness == Handedness::Right) {
-                bx = normalized_or_fallback(vk::math::cross(by, bz), {1.0f, 0.0f, 0.0f, 0.0f});
+                right = vk::math::cross(forward_world, up_hint);
+                right = normalized_or(right, {1.0f, 0.0f, 0.0f, 0.0f});
+                up    = vk::math::cross(right, forward_world);
             } else {
-                bx = normalized_or_fallback(vk::math::cross(bz, by), {1.0f, 0.0f, 0.0f, 0.0f});
+                right = vk::math::cross(up_hint, forward_world);
+                right = normalized_or(right, {1.0f, 0.0f, 0.0f, 0.0f});
+                up    = vk::math::cross(forward_world, right);
             }
-            out_x = bx;
-            out_y = by;
-            out_z = bz;
-            return;
+
+            up = normalized_or(up, up_hint);
+            return {right, up, forward_world};
         }
 
-        const float s                       = (conv.view_forward.sign == Sign::Positive) ? 1.0f : -1.0f;
-        const math::vec3 axis_forward_world = mul3(f.forward, s);
+        // Map the geometric frame into the view-space axis assignment defined by Convention.
+        //
+        // Idea:
+        //   - We already have a world-space "forward direction" (where the camera looks).
+        //   - Convention says which view axis represents "forward" (X/Y/Z) and its sign.
+        //   - We output world-space vectors bx/by/bz which correspond to view X/Y/Z axes.
+        //
+        // The math is intentionally explicit, because implicit assumptions here are a
+        // common source of "my camera is rotated 90 degrees" bugs.
+        [[nodiscard]] inline Basis map_frame_to_view_axes(const Convention& conv, const Frame& f) noexcept {
+            math::vec3 bx{};
+            math::vec3 by = f.up;
+            math::vec3 bz{};
 
-        if (conv.view_forward.axis == Axis::Z) {
-            bz = axis_forward_world;
+            const float fwd_sign = (conv.view_forward.sign == Sign::Positive) ? 1.0f : -1.0f;
+            const math::vec3 fwd = mul3(f.forward, fwd_sign);
+
+            if (conv.view_forward.axis == Axis::Z) {
+                bz = normalized_or(fwd, {0.0f, 0.0f, -1.0f, 0.0f});
+
+                if (conv.handedness == Handedness::Right) {
+                    bx = normalized_or(vk::math::cross(by, bz), {1.0f, 0.0f, 0.0f, 0.0f});
+                    by = normalized_or(vk::math::cross(bz, bx), by);
+                } else {
+                    bx = normalized_or(vk::math::cross(bz, by), {1.0f, 0.0f, 0.0f, 0.0f});
+                    by = normalized_or(vk::math::cross(bx, bz), by);
+                }
+
+                return {bx, by, bz};
+            }
+
+            if (conv.view_forward.axis == Axis::X) {
+                bx = normalized_or(fwd, {1.0f, 0.0f, 0.0f, 0.0f});
+
+                if (conv.handedness == Handedness::Right) {
+                    bz = normalized_or(vk::math::cross(bx, by), {0.0f, 0.0f, 1.0f, 0.0f});
+                    by = normalized_or(vk::math::cross(bz, bx), by);
+                } else {
+                    bz = normalized_or(vk::math::cross(by, bx), {0.0f, 0.0f, 1.0f, 0.0f});
+                    by = normalized_or(vk::math::cross(bx, bz), by);
+                }
+
+                return {bx, by, bz};
+            }
+
+            // view_forward.axis == Axis::Y:
+            // In this special case, "forward" is the Y axis, so we treat up as forward-adjacent
+            // and reconstruct the remaining axes from the geometric frame.
+            bz = normalized_or(vk::math::cross(f.right, f.up), {0.0f, 0.0f, 1.0f, 0.0f});
+
             if (conv.handedness == Handedness::Right) {
-                bx = normalized_or_fallback(vk::math::cross(by, bz), {1.0f, 0.0f, 0.0f, 0.0f});
-                by = normalized_or_fallback(vk::math::cross(bz, bx), by);
+                bx = normalized_or(vk::math::cross(by, bz), {1.0f, 0.0f, 0.0f, 0.0f});
             } else {
-                bx = normalized_or_fallback(vk::math::cross(bz, by), {1.0f, 0.0f, 0.0f, 0.0f});
-                by = normalized_or_fallback(vk::math::cross(bx, bz), by);
+                bx = normalized_or(vk::math::cross(bz, by), {1.0f, 0.0f, 0.0f, 0.0f});
             }
-        } else {
-            bx = axis_forward_world;
-            if (conv.handedness == Handedness::Right) {
-                bz = normalized_or_fallback(vk::math::cross(bx, by), {0.0f, 0.0f, 1.0f, 0.0f});
-                by = normalized_or_fallback(vk::math::cross(bz, bx), by);
-            } else {
-                bz = normalized_or_fallback(vk::math::cross(by, bx), {0.0f, 0.0f, 1.0f, 0.0f});
-                by = normalized_or_fallback(vk::math::cross(bx, bz), by);
-            }
+
+            return {bx, by, bz};
         }
 
-        out_x = bx;
-        out_y = by;
-        out_z = bz;
-    }
+        [[nodiscard]] inline math::mat4 make_w2c(math::vec3 eye, math::vec3 bx, math::vec3 by, math::vec3 bz) noexcept {
+            math::mat4 m{};
+            m.c0 = {bx.x, by.x, bz.x, 0.0f};
+            m.c1 = {bx.y, by.y, bz.y, 0.0f};
+            m.c2 = {bx.z, by.z, bz.z, 0.0f};
 
-    static math::mat4 make_w2c(math::vec3 eye, math::vec3 bx, math::vec3 by, math::vec3 bz) noexcept {
-        math::mat4 m{};
-        m.c0 = {bx.x, by.x, bz.x, 0.0f};
-        m.c1 = {bx.y, by.y, bz.y, 0.0f};
-        m.c2 = {bx.z, by.z, bz.z, 0.0f};
+            const float tx = -vk::math::dot(bx, eye);
+            const float ty = -vk::math::dot(by, eye);
+            const float tz = -vk::math::dot(bz, eye);
 
-        const float tx = -vk::math::dot(bx, eye);
-        const float ty = -vk::math::dot(by, eye);
-        const float tz = -vk::math::dot(bz, eye);
-
-        m.c3 = {tx, ty, tz, 1.0f};
-        return m;
-    }
-
-    static math::mat4 make_c2w(math::vec3 eye, math::vec3 bx, math::vec3 by, math::vec3 bz) noexcept {
-        math::mat4 m{};
-        m.c0 = {bx.x, bx.y, bx.z, 0.0f};
-        m.c1 = {by.x, by.y, by.z, 0.0f};
-        m.c2 = {bz.x, bz.y, bz.z, 0.0f};
-        m.c3 = {eye.x, eye.y, eye.z, 1.0f};
-        return m;
-    }
-
-    void Camera::set_pose_from_engine_c2w_(const math::mat4& c2w_engine) noexcept {
-        const math::vec3 bx{c2w_engine.c0.x, c2w_engine.c0.y, c2w_engine.c0.z, 0.0f};
-        const math::vec3 by{c2w_engine.c1.x, c2w_engine.c1.y, c2w_engine.c1.z, 0.0f};
-        const math::vec3 bz{c2w_engine.c2.x, c2w_engine.c2.y, c2w_engine.c2.z, 0.0f};
-        const math::vec3 eye{c2w_engine.c3.x, c2w_engine.c3.y, c2w_engine.c3.z, 0.0f};
-
-        m_.eye     = eye;
-        m_.right   = normalized_or_fallback(bx, {1.0f, 0.0f, 0.0f, 0.0f});
-        m_.up      = normalized_or_fallback(by, {0.0f, 1.0f, 0.0f, 0.0f});
-        m_.forward = normalized_or_fallback(bz, {0.0f, 0.0f, -1.0f, 0.0f});
-
-        st_.fly.eye       = eye;
-        st_.fly.yaw_rad   = std::atan2(m_.forward.z, m_.forward.x);
-        st_.fly.pitch_rad = clamp_pitch(std::asin(clampf(m_.forward.y, -1.0f, 1.0f)));
-    }
-
-    void Camera::set_from_external_c2w(const math::mat4& external_c2w, const Convention& external_convention, bool reset_mode) noexcept {
-        math::mat4 world_remap{};
-        const bool looks_like_blender = external_convention.handedness == Handedness::Right && external_convention.world_up.axis == Axis::Z && external_convention.world_up.sign == Sign::Positive;
-
-        if (looks_like_blender) {
-            world_remap = make_world_axis_remap_blender_to_vk();
-        } else {
-            world_remap.c0 = {1.0f, 0.0f, 0.0f, 0.0f};
-            world_remap.c1 = {0.0f, 1.0f, 0.0f, 0.0f};
-            world_remap.c2 = {0.0f, 0.0f, 1.0f, 0.0f};
-            world_remap.c3 = {0.0f, 0.0f, 0.0f, 1.0f};
+            m.c3 = {tx, ty, tz, 1.0f};
+            return m;
         }
 
-        const math::mat4 c2w_engine = mul_mat4(world_remap, external_c2w);
+        [[nodiscard]] inline math::mat4 make_c2w(math::vec3 eye, math::vec3 bx, math::vec3 by, math::vec3 bz) noexcept {
+            math::mat4 m{};
+            m.c0 = {bx.x, bx.y, bx.z, 0.0f};
+            m.c1 = {by.x, by.y, by.z, 0.0f};
+            m.c2 = {bz.x, bz.y, bz.z, 0.0f};
+            m.c3 = {eye.x, eye.y, eye.z, 1.0f};
+            return m;
+        }
 
-        if (reset_mode) st_.mode = Mode::Fly;
+        // Compute a world-space "look direction" from yaw/pitch given Convention.
+        //
+        // Convention gives:
+        //   - world_up: the axis we yaw around
+        //   - view_forward: the local forward direction at yaw=pitch=0
+        //
+        // Steps:
+        //   1) yaw rotates local forward around world_up
+        //   2) pitch rotates around the current right axis
+        [[nodiscard]] inline math::vec3 look_from_yaw_pitch(const Convention& conv, float yaw_rad, float pitch_rad) noexcept {
+            const math::vec3 up_axis       = axis_dir_to_vec3(conv.world_up);
+            const math::vec3 local_forward = axis_dir_to_vec3(conv.view_forward);
 
-        set_pose_from_engine_c2w_(c2w_engine);
-        recompute_matrices();
+            math::vec3 look = rotate_axis_angle(local_forward, up_axis, yaw_rad);
+
+            math::vec3 right = (conv.handedness == Handedness::Right) ? vk::math::cross(look, up_axis) : vk::math::cross(up_axis, look);
+            right            = normalized_or(right, {1.0f, 0.0f, 0.0f, 0.0f});
+
+            look = rotate_axis_angle(look, right, pitch_rad);
+            look = normalized_or(look, local_forward);
+
+            return look;
+        }
+
+        // A minimal, explicit Blender-like world remap (Z-up right-handed -> Y-up engine).
+        // This matches your original behavior; it is intentionally not "magical".
+        [[nodiscard]] inline bool looks_like_blender_world(const Convention& c) noexcept {
+            return c.handedness == Handedness::Right && c.world_up.axis == Axis::Z && c.world_up.sign == Sign::Positive;
+        }
+
+        [[nodiscard]] inline math::mat4 blender_world_to_engine_world() noexcept {
+            math::mat4 m{};
+            m.c0 = {1.0f, 0.0f, 0.0f, 0.0f};
+            m.c1 = {0.0f, 0.0f, 1.0f, 0.0f};
+            m.c2 = {0.0f, -1.0f, 0.0f, 0.0f};
+            m.c3 = {0.0f, 0.0f, 0.0f, 1.0f};
+            return m;
+        }
+
+        [[nodiscard]] inline math::mat4 identity4() noexcept {
+            math::mat4 m{};
+            m.c0 = {1.0f, 0.0f, 0.0f, 0.0f};
+            m.c1 = {0.0f, 1.0f, 0.0f, 0.0f};
+            m.c2 = {0.0f, 0.0f, 1.0f, 0.0f};
+            m.c3 = {0.0f, 0.0f, 0.0f, 1.0f};
+            return m;
+        }
+
+    } // namespace detail
+
+    // -------------------------------------------------------------------------
+    // Camera methods
+    // -------------------------------------------------------------------------
+
+    float Camera::clamp_pitch_(float rad) noexcept {
+        return detail::clampf(rad, -detail::pitch_limit_rad, detail::pitch_limit_rad);
     }
 
     void Camera::set_config(const CameraConfig& cfg) noexcept {
-        cfg_ = cfg;
-        update_projection(vw_, vh_);
-        recompute_matrices();
+        cfg_                = cfg;
+        st_.orbit.pitch_rad = clamp_pitch_(st_.orbit.pitch_rad);
+        st_.fly.pitch_rad   = clamp_pitch_(st_.fly.pitch_rad);
+
+        rebuild_projection_(vw_, vh_);
+        rebuild_matrices_();
     }
 
     void Camera::set_state(const CameraState& st) noexcept {
         st_                 = st;
-        st_.orbit.pitch_rad = clamp_pitch(st_.orbit.pitch_rad);
-        st_.fly.pitch_rad   = clamp_pitch(st_.fly.pitch_rad);
-        recompute_matrices();
+        st_.orbit.pitch_rad = clamp_pitch_(st_.orbit.pitch_rad);
+        st_.fly.pitch_rad   = clamp_pitch_(st_.fly.pitch_rad);
+
+        rebuild_matrices_();
     }
 
     void Camera::set_mode(Mode m) noexcept {
         st_.mode = m;
-        recompute_matrices();
+        rebuild_matrices_();
     }
 
     void Camera::set_projection(Projection p) noexcept {
         cfg_.projection = p;
-        update_projection(vw_, vh_);
-        recompute_matrices();
+        rebuild_projection_(vw_, vh_);
+        rebuild_matrices_();
     }
 
     void Camera::set_convention(const Convention& c) noexcept {
         cfg_.convention = c;
-        recompute_matrices();
+        rebuild_matrices_();
     }
 
     void Camera::home() noexcept {
@@ -289,8 +293,8 @@ namespace vk::camera {
         st_.fly.yaw_rad   = -1.57079632679f;
         st_.fly.pitch_rad = 0.0f;
 
-        update_projection(vw_, vh_);
-        recompute_matrices();
+        rebuild_projection_(vw_, vh_);
+        rebuild_matrices_();
     }
 
     const CameraConfig& Camera::config() const noexcept {
@@ -307,83 +311,93 @@ namespace vk::camera {
         vw_ = viewport_w ? viewport_w : 1;
         vh_ = viewport_h ? viewport_h : 1;
 
-        update_projection(vw_, vh_);
+        rebuild_projection_(vw_, vh_);
 
         if (st_.mode == Mode::Orbit) {
-            update_orbit(dt_sec, input, vw_, vh_);
+            step_orbit_(input, vw_, vh_);
         } else {
-            update_fly(dt_sec, input);
+            step_fly_(dt_sec, input);
         }
 
-        recompute_matrices();
+        rebuild_matrices_();
     }
 
-    void Camera::update_projection(std::uint32_t w, std::uint32_t h) noexcept {
-        const float aspect = float(w) / float(h ? h : 1);
+    void Camera::rebuild_projection_(std::uint32_t w, std::uint32_t h) noexcept {
+        const float aspect = detail::safe_aspect(w, h);
 
         if (cfg_.projection == Projection::Perspective) {
+            // Assumes vk::math::perspective_vk produces Vulkan-style clip space projection.
             m_.proj = math::perspective_vk(cfg_.fov_y_rad, aspect, cfg_.znear, cfg_.zfar);
-        } else {
-            const float hh = cfg_.ortho_height * 0.5f;
-            const float hw = hh * aspect;
-
-            math::mat4 p{};
-            p.c0    = {1.0f / hw, 0.0f, 0.0f, 0.0f};
-            p.c1    = {0.0f, 1.0f / hh, 0.0f, 0.0f};
-            p.c2    = {0.0f, 0.0f, 1.0f / (cfg_.zfar - cfg_.znear), 0.0f};
-            p.c3    = {0.0f, 0.0f, -cfg_.znear / (cfg_.zfar - cfg_.znear), 1.0f};
-            m_.proj = p;
+            return;
         }
+
+        // Orthographic projection in Vulkan clip space.
+        const float hh = cfg_.ortho_height * 0.5f;
+        const float hw = hh * aspect;
+
+        math::mat4 p{};
+        p.c0    = {1.0f / hw, 0.0f, 0.0f, 0.0f};
+        p.c1    = {0.0f, 1.0f / hh, 0.0f, 0.0f};
+        p.c2    = {0.0f, 0.0f, 1.0f / (cfg_.zfar - cfg_.znear), 0.0f};
+        p.c3    = {0.0f, 0.0f, -cfg_.znear / (cfg_.zfar - cfg_.znear), 1.0f};
+        m_.proj = p;
     }
 
-    void Camera::update_orbit(float, const CameraInput& in, std::uint32_t vw, std::uint32_t vh) noexcept {
+    void Camera::step_orbit_(const CameraInput& in, std::uint32_t vw, std::uint32_t vh) noexcept {
+        // Current UI choice: "Houdini-style" orbit manipulation under Alt or Space.
+        // This is kept as behavior-compatible with your original code.
         const bool houdini = in.alt || in.space;
 
         if (houdini && in.lmb) {
             st_.orbit.yaw_rad += in.mouse_dx * cfg_.orbit_rotate_sens;
-            st_.orbit.pitch_rad += in.mouse_dy * cfg_.orbit_rotate_sens;
-            st_.orbit.pitch_rad = clamp_pitch(st_.orbit.pitch_rad);
+            st_.orbit.pitch_rad = clamp_pitch_(st_.orbit.pitch_rad + in.mouse_dy * cfg_.orbit_rotate_sens);
         }
 
         if (houdini && in.mmb) {
             const float base = (cfg_.projection == Projection::Orthographic) ? std::max(1e-4f, cfg_.ortho_height) : std::max(1e-4f, st_.orbit.distance);
-            const float pan  = base * cfg_.orbit_pan_sens;
 
-            const float sx  = float(vw);
-            const float sy  = float(vh);
-            const float ndx = (sx > 0.0f) ? (in.mouse_dx / sx) : 0.0f;
-            const float ndy = (sy > 0.0f) ? (in.mouse_dy / sy) : 0.0f;
+            const float pan = base * cfg_.orbit_pan_sens;
 
-            const math::vec3 up            = axis_dir_to_vec3(cfg_.convention.world_up);
-            const math::vec3 local_forward = axis_dir_to_vec3(cfg_.convention.view_forward);
+            const float sx  = float(vw ? vw : 1);
+            const float sy  = float(vh ? vh : 1);
+            const float ndx = in.mouse_dx / sx;
+            const float ndy = in.mouse_dy / sy;
 
-            math::vec3 look = rotate_axis_angle(local_forward, up, st_.orbit.yaw_rad);
+            // We pan in the camera plane using (right, world_up). This matches typical DCC behavior:
+            //   - horizontal drag moves along camera right
+            //   - vertical drag moves along world up
+            const math::vec3 up_axis = detail::axis_dir_to_vec3(cfg_.convention.world_up);
+            const math::vec3 look    = detail::look_from_yaw_pitch(cfg_.convention, st_.orbit.yaw_rad, 0.0f);
 
-            math::vec3 right = (cfg_.convention.handedness == Handedness::Right) ? vk::math::cross(look, up) : vk::math::cross(up, look);
-            right            = normalized_or_fallback(right, {1.0f, 0.0f, 0.0f, 0.0f});
+            math::vec3 right_axis = (cfg_.convention.handedness == Handedness::Right) ? vk::math::cross(look, up_axis) : vk::math::cross(up_axis, look);
+            right_axis            = detail::normalized_or(right_axis, {1.0f, 0.0f, 0.0f, 0.0f});
 
-            st_.orbit.target = sub3(st_.orbit.target, mul3(right, ndx * pan * 2.0f));
-            st_.orbit.target = add3(st_.orbit.target, mul3(up, ndy * pan * 2.0f));
+            st_.orbit.target = detail::sub3(st_.orbit.target, detail::mul3(right_axis, ndx * pan * 2.0f));
+            st_.orbit.target = detail::add3(st_.orbit.target, detail::mul3(up_axis, ndy * pan * 2.0f));
         }
 
+        // Zoom can be triggered by scroll, or RMB drag under the "houdini" modifier.
         if ((houdini && in.rmb) || (in.scroll != 0.0f)) {
-            const float s = in.scroll + (houdini && in.rmb ? (-in.mouse_dy * 0.01f) : 0.0f);
+            const float drag_zoom = (houdini && in.rmb) ? (-in.mouse_dy * 0.01f) : 0.0f;
+            const float s         = in.scroll + drag_zoom;
+
             if (s != 0.0f) {
                 const float factor = std::exp(-s * cfg_.orbit_zoom_sens);
+
                 if (cfg_.projection == Projection::Perspective) {
-                    st_.orbit.distance = clampf(st_.orbit.distance * factor, 1e-4f, 1e6f);
+                    st_.orbit.distance = detail::clampf(st_.orbit.distance * factor, 1e-4f, 1e6f);
                 } else {
-                    cfg_.ortho_height = clampf(cfg_.ortho_height * factor, 1e-4f, 1e6f);
+                    cfg_.ortho_height = detail::clampf(cfg_.ortho_height * factor, 1e-4f, 1e6f);
                 }
             }
         }
     }
 
-    void Camera::update_fly(float dt, const CameraInput& in) noexcept {
+    void Camera::step_fly_(float dt, const CameraInput& in) noexcept {
+        // Standard FPS behavior: RMB enables mouse look.
         if (in.rmb) {
             st_.fly.yaw_rad += in.mouse_dx * cfg_.fly_look_sens;
-            st_.fly.pitch_rad += in.mouse_dy * cfg_.fly_look_sens;
-            st_.fly.pitch_rad = clamp_pitch(st_.fly.pitch_rad);
+            st_.fly.pitch_rad = clamp_pitch_(st_.fly.pitch_rad + in.mouse_dy * cfg_.fly_look_sens);
         }
 
         float speed = cfg_.fly_speed;
@@ -392,71 +406,94 @@ namespace vk::camera {
 
         const float move = speed * dt;
 
-        const math::vec3 up            = axis_dir_to_vec3(cfg_.convention.world_up);
-        const math::vec3 local_forward = axis_dir_to_vec3(cfg_.convention.view_forward);
+        const math::vec3 up_axis = detail::axis_dir_to_vec3(cfg_.convention.world_up);
 
-        math::vec3 look = rotate_axis_angle(local_forward, up, st_.fly.yaw_rad);
+        // Look direction from yaw/pitch.
+        math::vec3 look = detail::look_from_yaw_pitch(cfg_.convention, st_.fly.yaw_rad, st_.fly.pitch_rad);
 
-        math::vec3 right = (cfg_.convention.handedness == Handedness::Right) ? vk::math::cross(look, up) : vk::math::cross(up, look);
-        right            = normalized_or_fallback(right, {1.0f, 0.0f, 0.0f, 0.0f});
+        // Build an orthonormal movement frame (right/up/look).
+        math::vec3 right_axis = (cfg_.convention.handedness == Handedness::Right) ? vk::math::cross(look, up_axis) : vk::math::cross(up_axis, look);
+        right_axis            = detail::normalized_or(right_axis, {1.0f, 0.0f, 0.0f, 0.0f});
 
-        look = rotate_axis_angle(look, right, st_.fly.pitch_rad);
-        look = normalized_or_fallback(look, local_forward);
+        math::vec3 up_move = (cfg_.convention.handedness == Handedness::Right) ? vk::math::cross(right_axis, look) : vk::math::cross(look, right_axis);
+        up_move            = detail::normalized_or(up_move, up_axis);
 
-        math::vec3 final_right = (cfg_.convention.handedness == Handedness::Right) ? vk::math::cross(look, up) : vk::math::cross(up, look);
-        final_right            = normalized_or_fallback(final_right, right);
-
-        math::vec3 final_up = (cfg_.convention.handedness == Handedness::Right) ? vk::math::cross(final_right, look) : vk::math::cross(look, final_right);
-        final_up            = normalized_or_fallback(final_up, up);
-
-        if (in.forward) st_.fly.eye = add3(st_.fly.eye, mul3(look, move));
-        if (in.backward) st_.fly.eye = sub3(st_.fly.eye, mul3(look, move));
-        if (in.right) st_.fly.eye = add3(st_.fly.eye, mul3(final_right, move));
-        if (in.left) st_.fly.eye = sub3(st_.fly.eye, mul3(final_right, move));
-        if (in.up) st_.fly.eye = add3(st_.fly.eye, mul3(final_up, move));
-        if (in.down) st_.fly.eye = sub3(st_.fly.eye, mul3(final_up, move));
+        if (in.forward) st_.fly.eye = detail::add3(st_.fly.eye, detail::mul3(look, move));
+        if (in.backward) st_.fly.eye = detail::sub3(st_.fly.eye, detail::mul3(look, move));
+        if (in.right) st_.fly.eye = detail::add3(st_.fly.eye, detail::mul3(right_axis, move));
+        if (in.left) st_.fly.eye = detail::sub3(st_.fly.eye, detail::mul3(right_axis, move));
+        if (in.up) st_.fly.eye = detail::add3(st_.fly.eye, detail::mul3(up_move, move));
+        if (in.down) st_.fly.eye = detail::sub3(st_.fly.eye, detail::mul3(up_move, move));
     }
 
-    void Camera::recompute_matrices() noexcept {
+    void Camera::rebuild_matrices_() noexcept {
+        // Step 1: determine eye position and desired forward direction in world space.
         math::vec3 eye{};
         math::vec3 forward_world{};
 
         if (st_.mode == Mode::Orbit) {
-            const math::vec3 local_forward = axis_dir_to_vec3(cfg_.convention.view_forward);
-            const math::vec3 up_axis       = axis_dir_to_vec3(cfg_.convention.world_up);
-
-            math::vec3 look = rotate_axis_angle(local_forward, up_axis, st_.orbit.yaw_rad);
-
-            math::vec3 right = (cfg_.convention.handedness == Handedness::Right) ? vk::math::cross(look, up_axis) : vk::math::cross(up_axis, look);
-            right            = normalized_or_fallback(right, {1.0f, 0.0f, 0.0f, 0.0f});
-
-            look = rotate_axis_angle(look, right, st_.orbit.pitch_rad);
-            look = normalized_or_fallback(look, local_forward);
-
-            forward_world = look;
-            eye           = sub3(st_.orbit.target, mul3(forward_world, st_.orbit.distance));
+            forward_world = detail::look_from_yaw_pitch(cfg_.convention, st_.orbit.yaw_rad, st_.orbit.pitch_rad);
+            eye           = detail::sub3(st_.orbit.target, detail::mul3(forward_world, st_.orbit.distance));
         } else {
+            // Fly uses explicit eye; forward comes from yaw/pitch.
             eye           = st_.fly.eye;
-            forward_world = m_.forward;
-            forward_world = normalized_or_fallback(forward_world, axis_dir_to_vec3(cfg_.convention.view_forward));
+            forward_world = detail::look_from_yaw_pitch(cfg_.convention, st_.fly.yaw_rad, st_.fly.pitch_rad);
         }
 
-        const Frame f = make_geometric_frame(cfg_.convention, forward_world);
+        // Step 2: build a stable geometric frame and then map it to view axes as per Convention.
+        const detail::Frame f = detail::make_geometric_frame(cfg_.convention, forward_world);
+        const detail::Basis b = detail::map_frame_to_view_axes(cfg_.convention, f);
 
-        math::vec3 bx{};
-        math::vec3 by{};
-        math::vec3 bz{};
-        build_basis_world_for_view_axes(cfg_.convention, f, bx, by, bz);
+        // Step 3: write outputs (basis vectors, matrices).
+        m_.eye     = eye;
+        m_.right   = b.x;
+        m_.up      = b.y;
+        m_.forward = b.z;
+
+        m_.w2c = detail::make_w2c(eye, b.x, b.y, b.z);
+        m_.c2w = detail::make_c2w(eye, b.x, b.y, b.z);
+
+        // Assumes vk::math::mul(mat4, mat4) exists.
+        m_.view_proj = vk::math::mul(m_.proj, m_.w2c);
+    }
+
+    void Camera::adopt_engine_c2w_(const math::mat4& c2w_engine) noexcept {
+        // Extract basis and position from the matrix columns (column-major).
+        const math::vec3 bx{c2w_engine.c0.x, c2w_engine.c0.y, c2w_engine.c0.z, 0.0f};
+        const math::vec3 by{c2w_engine.c1.x, c2w_engine.c1.y, c2w_engine.c1.z, 0.0f};
+        const math::vec3 bz{c2w_engine.c2.x, c2w_engine.c2.y, c2w_engine.c2.z, 0.0f};
+        const math::vec3 eye{c2w_engine.c3.x, c2w_engine.c3.y, c2w_engine.c3.z, 0.0f};
 
         m_.eye     = eye;
-        m_.right   = bx;
-        m_.up      = by;
-        m_.forward = bz;
+        m_.right   = detail::normalized_or(bx, {1.0f, 0.0f, 0.0f, 0.0f});
+        m_.up      = detail::normalized_or(by, {0.0f, 1.0f, 0.0f, 0.0f});
+        m_.forward = detail::normalized_or(bz, {0.0f, 0.0f, -1.0f, 0.0f});
 
-        m_.w2c = make_w2c(eye, bx, by, bz);
-        m_.c2w = make_c2w(eye, bx, by, bz);
+        // Convert basis to yaw/pitch for fly mode.
+        // Note: yaw is computed in XZ plane; pitch from Y.
+        st_.fly.eye       = eye;
+        st_.fly.yaw_rad   = std::atan2(m_.forward.z, m_.forward.x);
+        st_.fly.pitch_rad = clamp_pitch_(std::asin(detail::clampf(m_.forward.y, -1.0f, 1.0f)));
+    }
 
-        m_.view_proj = vk::math::mul(m_.proj, m_.w2c);
+    void Camera::set_from_external_c2w(const math::mat4& external_c2w, const Convention& external_convention, bool reset_mode) noexcept {
+        // This function is intentionally conservative:
+        //   - if the external world looks like Blender (Z-up RH), apply a known remap
+        //   - otherwise assume external world axes already match engine world axes
+        //
+        // If you want fully general conversion (arbitrary external convention -> engine convention),
+        // I can implement it, but I need one precise statement from you:
+        //   "external_c2w maps from camera-local axes defined by external_convention.view_forward/world_up"
+        // or
+        //   "external_c2w is purely a world transform already, and external_convention only describes world axes"
+        const math::mat4 world_remap = detail::looks_like_blender_world(external_convention) ? detail::blender_world_to_engine_world() : detail::identity4();
+
+        const math::mat4 c2w_engine = vk::math::mul(world_remap, external_c2w);
+
+        if (reset_mode) st_.mode = Mode::Fly;
+
+        adopt_engine_c2w_(c2w_engine);
+        rebuild_matrices_();
     }
 
 } // namespace vk::camera
