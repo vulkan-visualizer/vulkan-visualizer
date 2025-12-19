@@ -152,18 +152,6 @@ namespace vk::camera {
         // Update controller state, then rebuild matrices.
         void update(float dt_sec, std::uint32_t viewport_w, std::uint32_t viewport_h, const CameraInput& input) noexcept;
 
-        // Consume an external camera-to-world and adopt it as the current pose.
-        // This is useful for datasets (e.g., NeRF/SLAM) that provide c2w.
-        //
-        // Current behavior:
-        //   - A small, explicit "Blender-like" world remap is supported
-        //   - Otherwise treated as already in engine world axes
-        //
-        // If you want fully general conversion between arbitrary conventions,
-        // tell me what "external convention" precisely means for your datasets
-        // (especially: does it describe world axes only, or also view forward?).
-        void set_from_external_c2w(const math::mat4& external_c2w, const Convention& external_convention, bool reset_mode = true) noexcept;
-
         [[nodiscard]] const CameraConfig& config() const noexcept;
         [[nodiscard]] const CameraState& state() const noexcept;
         [[nodiscard]] const CameraMatrices& matrices() const noexcept;
@@ -176,9 +164,6 @@ namespace vk::camera {
         // Rebuild derived data: projection + view matrices + basis vectors.
         void rebuild_projection_(std::uint32_t w, std::uint32_t h) noexcept;
         void rebuild_matrices_() noexcept;
-
-        // Adopt a c2w that is already in engine world axes.
-        void adopt_engine_c2w_(const math::mat4& c2w_engine) noexcept;
 
         static float clamp_pitch_(float rad) noexcept;
 

@@ -1,3 +1,4 @@
+
 module vk.camera;
 
 import vk.math;
@@ -213,30 +214,6 @@ namespace vk::camera {
             look = normalized_or(look, local_forward);
 
             return look;
-        }
-
-        // A minimal, explicit Blender-like world remap (Z-up right-handed -> Y-up engine).
-        // This matches your original behavior; it is intentionally not "magical".
-        [[nodiscard]] inline bool looks_like_blender_world(const Convention& c) noexcept {
-            return c.handedness == Handedness::Right && c.world_up.axis == Axis::Z && c.world_up.sign == Sign::Positive;
-        }
-
-        [[nodiscard]] inline math::mat4 blender_world_to_engine_world() noexcept {
-            math::mat4 m{};
-            m.c0 = {1.0f, 0.0f, 0.0f, 0.0f};
-            m.c1 = {0.0f, 0.0f, 1.0f, 0.0f};
-            m.c2 = {0.0f, -1.0f, 0.0f, 0.0f};
-            m.c3 = {0.0f, 0.0f, 0.0f, 1.0f};
-            return m;
-        }
-
-        [[nodiscard]] inline math::mat4 identity4() noexcept {
-            math::mat4 m{};
-            m.c0 = {1.0f, 0.0f, 0.0f, 0.0f};
-            m.c1 = {0.0f, 1.0f, 0.0f, 0.0f};
-            m.c2 = {0.0f, 0.0f, 1.0f, 0.0f};
-            m.c3 = {0.0f, 0.0f, 0.0f, 1.0f};
-            return m;
         }
 
     } // namespace detail
@@ -455,45 +432,6 @@ namespace vk::camera {
 
         // Assumes vk::math::mul(mat4, mat4) exists.
         m_.view_proj = vk::math::mul(m_.proj, m_.w2c);
-    }
-
-    void Camera::adopt_engine_c2w_(const math::mat4& c2w_engine) noexcept {
-        // Extract basis and position from the matrix columns (column-major).
-        const math::vec3 bx{c2w_engine.c0.x, c2w_engine.c0.y, c2w_engine.c0.z, 0.0f};
-        const math::vec3 by{c2w_engine.c1.x, c2w_engine.c1.y, c2w_engine.c1.z, 0.0f};
-        const math::vec3 bz{c2w_engine.c2.x, c2w_engine.c2.y, c2w_engine.c2.z, 0.0f};
-        const math::vec3 eye{c2w_engine.c3.x, c2w_engine.c3.y, c2w_engine.c3.z, 0.0f};
-
-        m_.eye     = eye;
-        m_.right   = detail::normalized_or(bx, {1.0f, 0.0f, 0.0f, 0.0f});
-        m_.up      = detail::normalized_or(by, {0.0f, 1.0f, 0.0f, 0.0f});
-        m_.forward = detail::normalized_or(bz, {0.0f, 0.0f, -1.0f, 0.0f});
-
-        // Convert basis to yaw/pitch for fly mode.
-        // Note: yaw is computed in XZ plane; pitch from Y.
-        st_.fly.eye       = eye;
-        st_.fly.yaw_rad   = std::atan2(m_.forward.z, m_.forward.x);
-        st_.fly.pitch_rad = clamp_pitch_(std::asin(detail::clampf(m_.forward.y, -1.0f, 1.0f)));
-    }
-
-    void Camera::set_from_external_c2w(const math::mat4& external_c2w, const Convention& external_convention, bool reset_mode) noexcept {
-        // This function is intentionally conservative:
-        //   - if the external world looks like Blender (Z-up RH), apply a known remap
-        //   - otherwise assume external world axes already match engine world axes
-        //
-        // If you want fully general conversion (arbitrary external convention -> engine convention),
-        // I can implement it, but I need one precise statement from you:
-        //   "external_c2w maps from camera-local axes defined by external_convention.view_forward/world_up"
-        // or
-        //   "external_c2w is purely a world transform already, and external_convention only describes world axes"
-        const math::mat4 world_remap = detail::looks_like_blender_world(external_convention) ? detail::blender_world_to_engine_world() : detail::identity4();
-
-        const math::mat4 c2w_engine = vk::math::mul(world_remap, external_c2w);
-
-        if (reset_mode) st_.mode = Mode::Fly;
-
-        adopt_engine_c2w_(c2w_engine);
-        rebuild_matrices_();
     }
 
 } // namespace vk::camera
