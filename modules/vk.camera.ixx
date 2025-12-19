@@ -25,7 +25,6 @@ namespace vk::camera {
 
     export struct CameraConfig {
         Projection projection = Projection::Perspective;
-
         Convention convention{};
 
         float fov_y_rad = std::numbers::pi_v<float> / 3.0f;
