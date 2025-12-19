@@ -19,9 +19,7 @@ namespace vk::camera {
 
     export struct Convention {
         Handedness handedness{Handedness::Right};
-
         AxisDir world_up{Axis::Y, Sign::Positive};
-
         AxisDir view_forward{Axis::Z, Sign::Negative};
     };
 
@@ -116,6 +114,8 @@ namespace vk::camera {
 
         void update(float dt_sec, std::uint32_t viewport_w, std::uint32_t viewport_h, const CameraInput& input) noexcept;
 
+        void set_from_external_c2w(const math::mat4& external_c2w, const Convention& external_convention, bool reset_mode = true) noexcept;
+
         [[nodiscard]] const CameraConfig& config() const noexcept;
         [[nodiscard]] const CameraState& state() const noexcept;
         [[nodiscard]] const CameraMatrices& matrices() const noexcept;
@@ -126,6 +126,8 @@ namespace vk::camera {
 
         void update_projection(std::uint32_t w, std::uint32_t h) noexcept;
         void recompute_matrices() noexcept;
+
+        void set_pose_from_engine_c2w_(const math::mat4& c2w_engine) noexcept;
 
         static float clamp_pitch(float x) noexcept;
 
