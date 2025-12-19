@@ -2,6 +2,8 @@ module;
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_vulkan.h>
 #include <imgui.h>
+
+#include <vulkan/vulkan_raii.hpp>
 module vk.imgui;
 import std;
 
