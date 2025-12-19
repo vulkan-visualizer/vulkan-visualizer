@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 project(vulkan_visualizer VERSION 1.2.0 LANGUAGES CXX)
 
-option(VK_XAYAH_BUILD_TESTS "Build the Vulkan Visualizer tests" OFF)
+option(VK_XAYAH_BUILD_TESTS "Build the Vulkan Visualizer tests" ON)
 
 # ============================================================================
 # C++ Configuration

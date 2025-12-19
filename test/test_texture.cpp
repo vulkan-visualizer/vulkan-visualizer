@@ -488,7 +488,7 @@ int main() {
 
             cam.update(dt, sc.extent.width, sc.extent.height, ci);
 
-            vk::imgui::draw_mini_axis_gizmo(cam.matrices().view);
+            vk::imgui::draw_mini_axis_gizmo(cam.matrices().c2w);
 
             in_state.dx     = 0.0f;
             in_state.dy     = 0.0f;

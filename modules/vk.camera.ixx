@@ -8,8 +8,27 @@ namespace vk::camera {
     export enum class Mode : std::uint8_t { Orbit, Fly };
     export enum class Projection : std::uint8_t { Perspective, Orthographic };
 
+    export enum class Axis : std::uint8_t { X, Y, Z };
+    export enum class Sign : std::int8_t { Positive = +1, Negative = -1 };
+    export enum class Handedness : std::uint8_t { Right, Left };
+
+    export struct AxisDir {
+        Axis axis{};
+        Sign sign{Sign::Positive};
+    };
+
+    export struct Convention {
+        Handedness handedness{Handedness::Right};
+
+        AxisDir world_up{Axis::Y, Sign::Positive};
+
+        AxisDir view_forward{Axis::Z, Sign::Negative};
+    };
+
     export struct CameraConfig {
         Projection projection = Projection::Perspective;
+
+        Convention convention{};
 
         float fov_y_rad = std::numbers::pi_v<float> / 3.0f;
         float znear     = 0.01f;
@@ -69,10 +88,17 @@ namespace vk::camera {
     };
 
     export struct CameraMatrices {
-        math::mat4 view{};
+        math::mat4 w2c{};
+        math::mat4 c2w{};
+
         math::mat4 proj{};
         math::mat4 view_proj{};
+
         math::vec3 eye{0.0f, 0.0f, 0.0f, 0.0f};
+
+        math::vec3 right{1.0f, 0.0f, 0.0f, 0.0f};
+        math::vec3 up{0.0f, 1.0f, 0.0f, 0.0f};
+        math::vec3 forward{0.0f, 0.0f, -1.0f, 0.0f};
     };
 
     export class Camera {
@@ -84,6 +110,8 @@ namespace vk::camera {
 
         void set_mode(Mode m) noexcept;
         void set_projection(Projection p) noexcept;
+
+        void set_convention(const Convention& c) noexcept;
         void home() noexcept;
 
         void update(float dt_sec, std::uint32_t viewport_w, std::uint32_t viewport_h, const CameraInput& input) noexcept;
@@ -95,9 +123,9 @@ namespace vk::camera {
     private:
         void update_orbit(float dt, const CameraInput& in, std::uint32_t vw, std::uint32_t vh) noexcept;
         void update_fly(float dt, const CameraInput& in) noexcept;
+
         void update_projection(std::uint32_t w, std::uint32_t h) noexcept;
-        void recompute_view() noexcept;
-        void recompute_viewproj() noexcept;
+        void recompute_matrices() noexcept;
 
         static float clamp_pitch(float x) noexcept;
 
