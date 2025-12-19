@@ -61,7 +61,7 @@ namespace vk::texture {
         raii::DeviceMemory memory{nullptr};
     };
 
-    static ImageWithMemory create_image_2d(const raii::PhysicalDevice& pd, const raii::Device& dev, uint32_t w, uint32_t h, uint32_t mip_levels, Format format, ImageUsageFlags usage) {
+    static ImageWithMemory create_image_2d(const raii::PhysicalDevice& pd, const raii::Device& dev, uint32_t w, uint32_t h, uint32_t mip_levels, uint32_t layers, Format format, ImageUsageFlags usage) {
         ImageWithMemory out{};
 
         ImageCreateInfo ici{};
@@ -69,7 +69,7 @@ namespace vk::texture {
         ici.format        = format;
         ici.extent        = Extent3D{w, h, 1};
         ici.mipLevels     = mip_levels;
-        ici.arrayLayers   = 1;
+        ici.arrayLayers   = layers;
         ici.samples       = SampleCountFlagBits::e1;
         ici.tiling        = ImageTiling::eOptimal;
         ici.usage         = usage;
@@ -118,7 +118,7 @@ namespace vk::texture {
         q.waitIdle();
     }
 
-    static void barrier_image(const raii::CommandBuffer& cmd, Image image, ImageAspectFlags aspect, uint32_t base_mip, uint32_t mip_count, ImageLayout old_layout, ImageLayout new_layout, PipelineStageFlags2 src_stage, AccessFlags2 src_access, PipelineStageFlags2 dst_stage, AccessFlags2 dst_access) {
+    static void barrier_image(const raii::CommandBuffer& cmd, Image image, ImageAspectFlags aspect, uint32_t base_mip, uint32_t mip_count, uint32_t base_layer, uint32_t layer_count, ImageLayout old_layout, ImageLayout new_layout, PipelineStageFlags2 src_stage, AccessFlags2 src_access, PipelineStageFlags2 dst_stage, AccessFlags2 dst_access) {
         ImageMemoryBarrier2 b{};
         b.srcStageMask                    = src_stage;
         b.srcAccessMask                   = src_access;
@@ -130,14 +130,19 @@ namespace vk::texture {
         b.subresourceRange.aspectMask     = aspect;
         b.subresourceRange.baseMipLevel   = base_mip;
         b.subresourceRange.levelCount     = mip_count;
-        b.subresourceRange.baseArrayLayer = 0;
-        b.subresourceRange.layerCount     = 1;
+        b.subresourceRange.baseArrayLayer = base_layer;
+        b.subresourceRange.layerCount     = layer_count;
 
         DependencyInfo dep{};
         dep.imageMemoryBarrierCount = 1;
         dep.pImageMemoryBarriers    = &b;
 
         cmd.pipelineBarrier2(dep);
+    }
+
+    // Legacy convenience overload (single-layer)
+    static void barrier_image(const raii::CommandBuffer& cmd, Image image, ImageAspectFlags aspect, uint32_t base_mip, uint32_t mip_count, ImageLayout old_layout, ImageLayout new_layout, PipelineStageFlags2 src_stage, AccessFlags2 src_access, PipelineStageFlags2 dst_stage, AccessFlags2 dst_access) {
+        barrier_image(cmd, image, aspect, base_mip, mip_count, 0, 1, old_layout, new_layout, src_stage, src_access, dst_stage, dst_access);
     }
 
     static bool supports_linear_blit(const raii::PhysicalDevice& pd, Format format) {
@@ -155,6 +160,19 @@ namespace vk::texture {
         vci.subresourceRange.levelCount     = mip_levels;
         vci.subresourceRange.baseArrayLayer = 0;
         vci.subresourceRange.layerCount     = 1;
+        return raii::ImageView{dev, vci};
+    }
+
+    static raii::ImageView create_view_2d_array(const raii::Device& dev, Image image, Format format, ImageAspectFlags aspect, uint32_t mip_levels, uint32_t layers) {
+        ImageViewCreateInfo vci{};
+        vci.image                           = image;
+        vci.viewType                        = ImageViewType::e2DArray;
+        vci.format                          = format;
+        vci.subresourceRange.aspectMask     = aspect;
+        vci.subresourceRange.baseMipLevel   = 0;
+        vci.subresourceRange.levelCount     = mip_levels;
+        vci.subresourceRange.baseArrayLayer = 0;
+        vci.subresourceRange.layerCount     = layers;
         return raii::ImageView{dev, vci};
     }
 
@@ -185,7 +203,8 @@ namespace vk::texture {
 
     Texture2D create_texture_2d_rgba8(const context::VulkanContext& vkctx, std::span<const std::byte> rgba8, Texture2DDesc desc) {
         if (desc.width == 0 || desc.height == 0) throw std::runtime_error("vk.texture: invalid extent");
-        const size_t expected = size_t(desc.width) * size_t(desc.height) * 4u;
+        if (desc.layers != 1) throw std::runtime_error("vk.texture: create_texture_2d_rgba8 expects layers == 1");
+        const size_t expected = size_t(desc.width) * size_t(desc.height) * size_t(desc.layers) * 4u;
         if (rgba8.size_bytes() != expected) throw std::runtime_error("vk.texture: rgba8 size mismatch");
 
         const Format format = desc.srgb ? Format::eR8G8B8A8Srgb : Format::eR8G8B8A8Unorm;
@@ -211,11 +230,11 @@ namespace vk::texture {
         ImageUsageFlags usage = ImageUsageFlagBits::eTransferDst | ImageUsageFlagBits::eSampled;
         if (mip_levels > 1) usage |= ImageUsageFlagBits::eTransferSrc;
 
-        auto img = create_image_2d(vkctx.physical_device, vkctx.device, desc.width, desc.height, mip_levels, format, usage);
+        auto img = create_image_2d(vkctx.physical_device, vkctx.device, desc.width, desc.height, mip_levels, desc.layers, format, usage);
 
         auto cmd = begin_one_time(vkctx.device, vkctx.command_pool);
 
-        barrier_image(cmd, *img.image, ImageAspectFlagBits::eColor, 0, mip_levels, ImageLayout::eUndefined, ImageLayout::eTransferDstOptimal, PipelineStageFlagBits2::eTopOfPipe, AccessFlags2{}, PipelineStageFlagBits2::eTransfer, AccessFlagBits2::eTransferWrite);
+        barrier_image(cmd, *img.image, ImageAspectFlagBits::eColor, 0, mip_levels, 0, 1, ImageLayout::eUndefined, ImageLayout::eTransferDstOptimal, PipelineStageFlagBits2::eTopOfPipe, AccessFlags2{}, PipelineStageFlagBits2::eTransfer, AccessFlagBits2::eTransferWrite);
 
         BufferImageCopy bic{};
         bic.bufferOffset                    = 0;
@@ -231,13 +250,13 @@ namespace vk::texture {
         cmd.copyBufferToImage(*staging.buffer, *img.image, ImageLayout::eTransferDstOptimal, bic);
 
         if (mip_levels == 1) {
-            barrier_image(cmd, *img.image, ImageAspectFlagBits::eColor, 0, 1, ImageLayout::eTransferDstOptimal, ImageLayout::eShaderReadOnlyOptimal, PipelineStageFlagBits2::eTransfer, AccessFlagBits2::eTransferWrite, PipelineStageFlagBits2::eFragmentShader, AccessFlagBits2::eShaderSampledRead);
+            barrier_image(cmd, *img.image, ImageAspectFlagBits::eColor, 0, 1, 0, 1, ImageLayout::eTransferDstOptimal, ImageLayout::eShaderReadOnlyOptimal, PipelineStageFlagBits2::eTransfer, AccessFlagBits2::eTransferWrite, PipelineStageFlagBits2::eFragmentShader, AccessFlagBits2::eShaderSampledRead);
         } else {
             uint32_t w = desc.width;
             uint32_t h = desc.height;
 
             for (uint32_t level = 1; level < mip_levels; ++level) {
-                barrier_image(cmd, *img.image, ImageAspectFlagBits::eColor, level - 1, 1, ImageLayout::eTransferDstOptimal, ImageLayout::eTransferSrcOptimal, PipelineStageFlagBits2::eTransfer, AccessFlagBits2::eTransferWrite, PipelineStageFlagBits2::eTransfer, AccessFlagBits2::eTransferRead);
+                barrier_image(cmd, *img.image, ImageAspectFlagBits::eColor, level - 1, 1, 0, 1, ImageLayout::eTransferDstOptimal, ImageLayout::eTransferSrcOptimal, PipelineStageFlagBits2::eTransfer, AccessFlagBits2::eTransferWrite, PipelineStageFlagBits2::eTransfer, AccessFlagBits2::eTransferRead);
 
                 ImageBlit blit{};
                 blit.srcSubresource.aspectMask     = ImageAspectFlagBits::eColor;
@@ -259,13 +278,13 @@ namespace vk::texture {
 
                 cmd.blitImage(*img.image, ImageLayout::eTransferSrcOptimal, *img.image, ImageLayout::eTransferDstOptimal, blit, Filter::eLinear);
 
-                barrier_image(cmd, *img.image, ImageAspectFlagBits::eColor, level - 1, 1, ImageLayout::eTransferSrcOptimal, ImageLayout::eShaderReadOnlyOptimal, PipelineStageFlagBits2::eTransfer, AccessFlagBits2::eTransferRead, PipelineStageFlagBits2::eFragmentShader, AccessFlagBits2::eShaderSampledRead);
+                barrier_image(cmd, *img.image, ImageAspectFlagBits::eColor, level - 1, 1, 0, 1, ImageLayout::eTransferSrcOptimal, ImageLayout::eShaderReadOnlyOptimal, PipelineStageFlagBits2::eTransfer, AccessFlagBits2::eTransferRead, PipelineStageFlagBits2::eFragmentShader, AccessFlagBits2::eShaderSampledRead);
 
                 w = nw;
                 h = nh;
             }
 
-            barrier_image(cmd, *img.image, ImageAspectFlagBits::eColor, mip_levels - 1, 1, ImageLayout::eTransferDstOptimal, ImageLayout::eShaderReadOnlyOptimal, PipelineStageFlagBits2::eTransfer, AccessFlagBits2::eTransferWrite, PipelineStageFlagBits2::eFragmentShader, AccessFlagBits2::eShaderSampledRead);
+            barrier_image(cmd, *img.image, ImageAspectFlagBits::eColor, mip_levels - 1, 1, 0, 1, ImageLayout::eTransferDstOptimal, ImageLayout::eShaderReadOnlyOptimal, PipelineStageFlagBits2::eTransfer, AccessFlagBits2::eTransferWrite, PipelineStageFlagBits2::eFragmentShader, AccessFlagBits2::eShaderSampledRead);
         }
 
         end_one_time(vkctx.graphics_queue, cmd);
@@ -273,10 +292,74 @@ namespace vk::texture {
         Texture2D out{};
         out.format     = format;
         out.extent     = Extent2D{desc.width, desc.height};
+        out.layers     = desc.layers;
         out.mip_levels = mip_levels;
         out.image      = std::move(img.image);
         out.memory     = std::move(img.memory);
         out.view       = create_view_2d(vkctx.device, *out.image, out.format, ImageAspectFlagBits::eColor, out.mip_levels);
+        out.sampler    = create_sampler_2d(vkctx.device, desc, out.mip_levels);
+
+        return out;
+    }
+
+    Texture2DArray create_texture_2d_array_rgba8(const context::VulkanContext& vkctx, std::span<const std::byte> rgba8, Texture2DDesc desc) {
+        if (desc.width == 0 || desc.height == 0 || desc.layers == 0) throw std::runtime_error("vk.texture: invalid extent/layers");
+        if (desc.mip_mode != MipMode::None) throw std::runtime_error("vk.texture: mip generation for arrays not implemented");
+        const size_t expected = size_t(desc.width) * size_t(desc.height) * size_t(desc.layers) * 4u;
+        if (rgba8.size_bytes() != expected) throw std::runtime_error("vk.texture: rgba8 size mismatch for array");
+
+        const Format format = desc.srgb ? Format::eR8G8B8A8Srgb : Format::eR8G8B8A8Unorm;
+        const uint32_t mip_levels = 1;
+
+        const DeviceSize upload_size = DeviceSize(rgba8.size_bytes());
+
+        auto staging = create_buffer(vkctx.physical_device, vkctx.device, upload_size, BufferUsageFlagBits::eTransferSrc, MemoryPropertyFlagBits::eHostVisible | MemoryPropertyFlagBits::eHostCoherent);
+
+        {
+            void* dst = staging.memory.mapMemory(0, upload_size);
+            std::memcpy(dst, rgba8.data(), rgba8.size_bytes());
+            staging.memory.unmapMemory();
+        }
+
+        ImageUsageFlags usage = ImageUsageFlagBits::eTransferDst | ImageUsageFlagBits::eSampled;
+
+        auto img = create_image_2d(vkctx.physical_device, vkctx.device, desc.width, desc.height, mip_levels, desc.layers, format, usage);
+
+        auto cmd = begin_one_time(vkctx.device, vkctx.command_pool);
+
+        barrier_image(cmd, *img.image, ImageAspectFlagBits::eColor, 0, mip_levels, 0, desc.layers, ImageLayout::eUndefined, ImageLayout::eTransferDstOptimal, PipelineStageFlagBits2::eTopOfPipe, AccessFlags2{}, PipelineStageFlagBits2::eTransfer, AccessFlagBits2::eTransferWrite);
+
+        std::vector<BufferImageCopy> regions;
+        regions.reserve(desc.layers);
+        const DeviceSize layer_stride = DeviceSize(size_t(desc.width) * size_t(desc.height) * 4u);
+        for (uint32_t layer = 0; layer < desc.layers; ++layer) {
+            BufferImageCopy bic{};
+            bic.bufferOffset                    = layer_stride * layer;
+            bic.bufferRowLength                 = 0;
+            bic.bufferImageHeight               = 0;
+            bic.imageSubresource.aspectMask     = ImageAspectFlagBits::eColor;
+            bic.imageSubresource.mipLevel       = 0;
+            bic.imageSubresource.baseArrayLayer = layer;
+            bic.imageSubresource.layerCount     = 1;
+            bic.imageOffset                     = Offset3D{0, 0, 0};
+            bic.imageExtent                     = Extent3D{desc.width, desc.height, 1};
+            regions.push_back(bic);
+        }
+
+        cmd.copyBufferToImage(*staging.buffer, *img.image, ImageLayout::eTransferDstOptimal, regions);
+
+        barrier_image(cmd, *img.image, ImageAspectFlagBits::eColor, 0, mip_levels, 0, desc.layers, ImageLayout::eTransferDstOptimal, ImageLayout::eShaderReadOnlyOptimal, PipelineStageFlagBits2::eTransfer, AccessFlagBits2::eTransferWrite, PipelineStageFlagBits2::eFragmentShader, AccessFlagBits2::eShaderSampledRead);
+
+        end_one_time(vkctx.graphics_queue, cmd);
+
+        Texture2DArray out{};
+        out.format     = format;
+        out.extent     = Extent2D{desc.width, desc.height};
+        out.layers     = desc.layers;
+        out.mip_levels = mip_levels;
+        out.image      = std::move(img.image);
+        out.memory     = std::move(img.memory);
+        out.view       = create_view_2d_array(vkctx.device, *out.image, out.format, ImageAspectFlagBits::eColor, out.mip_levels, out.layers);
         out.sampler    = create_sampler_2d(vkctx.device, desc, out.mip_levels);
 
         return out;

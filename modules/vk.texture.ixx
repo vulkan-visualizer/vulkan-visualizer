@@ -11,6 +11,19 @@ namespace vk::texture {
         Format format = Format::eUndefined;
         Extent2D extent{};
         uint32_t mip_levels = 1;
+        uint32_t layers     = 1;
+
+        raii::Image image{nullptr};
+        raii::DeviceMemory memory{nullptr};
+        raii::ImageView view{nullptr};
+        raii::Sampler sampler{nullptr};
+    };
+
+    export struct Texture2DArray {
+        Format format = Format::eUndefined;
+        Extent2D extent{};
+        uint32_t mip_levels = 1;
+        uint32_t layers     = 1;
 
         raii::Image image{nullptr};
         raii::DeviceMemory memory{nullptr};
@@ -26,6 +39,7 @@ namespace vk::texture {
     export struct Texture2DDesc {
         uint32_t width   = 1;
         uint32_t height  = 1;
+        uint32_t layers  = 1;
         bool srgb        = false;
         MipMode mip_mode = MipMode::Generate;
 
@@ -41,5 +55,6 @@ namespace vk::texture {
     };
 
     export [[nodiscard]] Texture2D create_texture_2d_rgba8(const context::VulkanContext& vkctx, std::span<const std::byte> rgba8, Texture2DDesc desc);
+    export [[nodiscard]] Texture2DArray create_texture_2d_array_rgba8(const context::VulkanContext& vkctx, std::span<const std::byte> rgba8, Texture2DDesc desc);
     export [[nodiscard]] raii::DescriptorSetLayout make_texture_set_layout(const raii::Device& device);
 } // namespace vk::texture
