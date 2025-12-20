@@ -264,7 +264,7 @@ namespace vk::camera {
         st_.orbit.target    = {0.0f, 0.0f, 0.0f, 0.0f};
         st_.orbit.distance  = 5.0f;
         st_.orbit.yaw_rad   = -0.78539816339f;
-        st_.orbit.pitch_rad = 0.43633231299f;
+        st_.orbit.pitch_rad = -0.43633231299f;
 
         st_.fly.eye       = {0.0f, 0.0f, 5.0f, 0.0f};
         st_.fly.yaw_rad   = -1.57079632679f;
