@@ -64,7 +64,7 @@ namespace vk::camera {
 
         // Orbit tuning.
         float orbit_rotate_sens = 0.0065f;
-        float orbit_pan_sens    = 0.0015f;
+        float orbit_pan_sens    = 1.0f;
         float orbit_zoom_sens   = 0.12f;
 
         // Fly tuning.

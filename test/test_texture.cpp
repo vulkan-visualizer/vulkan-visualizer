@@ -94,8 +94,8 @@ static void glfw_cursor_pos_cb(GLFWwindow* w, double x, double y) {
         return;
     }
 
-    s->dx += float(x - s->last_x);
-    s->dy += float(y - s->last_y);
+    s->dx -= float(x - s->last_x);
+    s->dy -= float(y - s->last_y);
 
     s->last_x = x;
     s->last_y = y;
