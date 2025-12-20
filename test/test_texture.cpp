@@ -94,8 +94,8 @@ static void glfw_cursor_pos_cb(GLFWwindow* w, double x, double y) {
         return;
     }
 
-    s->dx -= float(x - s->last_x);
-    s->dy -= float(y - s->last_y);
+    s->dx += float(x - s->last_x);
+    s->dy += float(y - s->last_y);
 
     s->last_x = x;
     s->last_y = y;
@@ -186,7 +186,7 @@ static TextureBinding create_texture_binding(const VulkanContext& vkctx, const T
 }
 
 static MeshState create_sphere_mesh(const VulkanContext& vkctx, float radius, uint32_t slices, uint32_t stacks, const vec4& color) {
-    const auto src = make_sphere<VertexP3C4T2>(radius, slices, stacks, color);
+    const auto src = make_cube<VertexP3C4T2>(radius, color);
 
     MeshCPU<VertexP3C4T2> cpu{};
     cpu.vertices = src.vertices;
@@ -207,7 +207,7 @@ static RenderState create_textured_render_state(const VulkanContext& vkctx, cons
     desc.color_format         = sc.format;
     desc.depth_format         = sc.depth_format;
     desc.use_depth            = true;
-    desc.cull                 = CullModeFlagBits::eBack;
+    desc.cull                 = CullModeFlagBits::eNone;
     desc.front_face           = FrontFace::eCounterClockwise;
     desc.polygon_mode         = wireframe ? PolygonMode::eLine : PolygonMode::eFill;
     desc.enable_blend         = false;

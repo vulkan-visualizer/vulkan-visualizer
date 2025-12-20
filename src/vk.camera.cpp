@@ -326,8 +326,8 @@ namespace vk::camera {
         const bool houdini = in.alt || in.space;
 
         if (houdini && in.lmb) {
-            st_.orbit.yaw_rad += in.mouse_dx * cfg_.orbit_rotate_sens;
-            st_.orbit.pitch_rad = clamp_pitch_(st_.orbit.pitch_rad + in.mouse_dy * cfg_.orbit_rotate_sens);
+            st_.orbit.yaw_rad -= in.mouse_dx * cfg_.orbit_rotate_sens;
+            st_.orbit.pitch_rad = clamp_pitch_(st_.orbit.pitch_rad - in.mouse_dy * cfg_.orbit_rotate_sens);
         }
 
         if (houdini && in.mmb) {
@@ -373,8 +373,8 @@ namespace vk::camera {
     void Camera::step_fly_(float dt, const CameraInput& in) noexcept {
         // Standard FPS behavior: RMB enables mouse look.
         if (in.rmb) {
-            st_.fly.yaw_rad += in.mouse_dx * cfg_.fly_look_sens;
-            st_.fly.pitch_rad = clamp_pitch_(st_.fly.pitch_rad + in.mouse_dy * cfg_.fly_look_sens);
+            st_.fly.yaw_rad -= in.mouse_dx * cfg_.fly_look_sens;
+            st_.fly.pitch_rad = clamp_pitch_(st_.fly.pitch_rad - in.mouse_dy * cfg_.fly_look_sens);
         }
 
         float speed = cfg_.fly_speed;
