@@ -28,6 +28,7 @@ namespace vk::imgui {
     export void shutdown(ImGuiSystem& sys);
 
     export void begin_frame();
+    export void end_frame();
 
     export void render(ImGuiSystem& sys, const raii::CommandBuffer& cmd, Extent2D extent, ImageView target_view, ImageLayout target_layout = ImageLayout::eColorAttachmentOptimal);
 

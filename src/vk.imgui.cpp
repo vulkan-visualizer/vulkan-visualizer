@@ -105,6 +105,13 @@ namespace vk::imgui {
         ImGui::NewFrame();
     }
 
+    void vk::imgui::end_frame() {
+        if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+            ImGui::UpdatePlatformWindows();
+            ImGui::RenderPlatformWindowsDefault();
+        }
+    }
+
     void render(ImGuiSystem&, const raii::CommandBuffer& cmd, const Extent2D extent, const ImageView target_view, ImageLayout target_layout) {
         ImGui::Render();
 
@@ -115,11 +122,6 @@ namespace vk::imgui {
         vkCmdBeginRendering(*cmd, &ri);
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), *cmd);
         vkCmdEndRendering(*cmd);
-
-        if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-            ImGui::UpdatePlatformWindows();
-            ImGui::RenderPlatformWindowsDefault();
-        }
     }
 
     void set_min_image_count(ImGuiSystem& sys, const uint32_t min_image_count) {
