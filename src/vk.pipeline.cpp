@@ -63,9 +63,10 @@ vk::pipeline::GraphicsPipeline vk::pipeline::create_graphics_pipeline(const raii
         },
     }};
 
+    const bool has_vertices = !vin.attributes.empty();
     const PipelineVertexInputStateCreateInfo vi{
-        .vertexBindingDescriptionCount   = 1,
-        .pVertexBindingDescriptions      = &vin.binding,
+        .vertexBindingDescriptionCount   = has_vertices ? 1u : 0u,
+        .pVertexBindingDescriptions      = has_vertices ? &vin.binding : nullptr,
         .vertexAttributeDescriptionCount = static_cast<std::uint32_t>(vin.attributes.size()),
         .pVertexAttributeDescriptions    = vin.attributes.empty() ? nullptr : vin.attributes.data(),
     };
