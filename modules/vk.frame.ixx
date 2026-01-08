@@ -30,7 +30,6 @@ namespace vk::frame {
     };
 
     export struct AcquireResult {
-        bool ok{false};
         bool need_recreate{false};
         uint32_t image_index{0};
     };

@@ -107,7 +107,6 @@ namespace vk::frame {
 
         frames.image_in_flight_frame.at(out.image_index) = frame_index;
 
-        out.ok = true;
         return out;
     }
 
