@@ -1,8 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 project(vulkan_visualizer VERSION 1.2.0 LANGUAGES CXX)
 
-option(VK_XAYAH_BUILD_TESTS "Build the Vulkan Visualizer tests" ON)
-
 # ============================================================================
 # C++ Configuration
 # ============================================================================
@@ -82,93 +80,3 @@ target_compile_definitions(vk-core PUBLIC VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1 V
 target_include_directories(vk-core PUBLIC
         $<BUILD_INTERFACE:${imgui_SOURCE_DIR}>
 )
-
-
-# ============================================================================
-# Test
-# ============================================================================
-if (VK_XAYAH_BUILD_TESTS)
-
-    # ============================================================================
-    # Shader Compilation
-    # ============================================================================
-    include(CMakeParseArguments)
-
-    function(add_slang_shader_target)
-        find_program(SLANGC_EXECUTABLE slangc HINTS $ENV{VULKAN_SDK}/bin REQUIRED)
-
-        cmake_parse_arguments(
-                SLANG
-                ""
-                "TARGET;OUTPUT_DIR"
-                "SOURCES"
-                ${ARGN}
-        )
-
-        if (NOT SLANG_TARGET)
-            message(FATAL_ERROR "add_slang_shader_target: TARGET is required")
-        endif ()
-
-        if (NOT SLANG_SOURCES)
-            message(FATAL_ERROR "add_slang_shader_target: SOURCES is required")
-        endif ()
-
-        if (NOT SLANG_OUTPUT_DIR)
-            set(SLANG_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
-        endif ()
-
-        set(OUTPUTS)
-
-        foreach (SRC ${SLANG_SOURCES})
-            get_filename_component(SHADER_NAME ${SRC} NAME_WE)
-            set(SPV ${SLANG_OUTPUT_DIR}/${SHADER_NAME}.spv)
-            set(ENTRY_POINTS -entry vertMain -entry fragMain)
-            add_custom_command(
-                    OUTPUT ${SPV}
-                    COMMAND ${CMAKE_COMMAND} -E make_directory ${SLANG_OUTPUT_DIR}
-                    COMMAND ${SLANGC_EXECUTABLE}
-                    ${SRC}
-                    -target spirv
-                    -profile spirv_1_4
-                    -emit-spirv-directly
-                    -fvk-use-entrypoint-name
-                    ${ENTRY_POINTS}
-                    -o ${SPV}
-                    DEPENDS ${SRC}
-                    COMMENT "Compiling Slang shader: ${SRC}"
-                    VERBATIM
-            )
-
-            list(APPEND OUTPUTS ${SPV})
-        endforeach ()
-
-        add_custom_target(${SLANG_TARGET} ALL
-                DEPENDS ${OUTPUTS}
-        )
-
-        set_target_properties(${SLANG_TARGET}
-                PROPERTIES
-                FOLDER "Shaders"
-        )
-    endfunction()
-
-    file(GLOB SHADER_SLANG_SOURCES
-            ${CMAKE_CURRENT_SOURCE_DIR}/test/shaders/*.slang
-    )
-
-    add_slang_shader_target(
-            TARGET vk_slang_shaders
-            SOURCES ${SHADER_SLANG_SOURCES}
-    )
-
-
-    enable_testing()
-    file(GLOB TEST_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test/*.cpp")
-    foreach (test_src ${TEST_SOURCES})
-        get_filename_component(test_name ${test_src} NAME_WE)
-        add_executable(${test_name} ${test_src})
-        target_link_libraries(${test_name} PRIVATE vk-core::vk-core)
-        add_dependencies(${test_name} vk_slang_shaders)
-        add_test(NAME run_${test_name} COMMAND ${test_name})
-    endforeach ()
-endif ()

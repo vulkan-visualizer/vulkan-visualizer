@@ -100,7 +100,7 @@ vk::pipeline::GraphicsPipeline vk::pipeline::create_graphics_pipeline(const raii
         };
     }
 
-    const auto blend_att = detail::make_blend_attachment(desc.enable_blend);
+    const auto blend_att = detail::make_blend_attachment(desc.use_blend);
     const PipelineColorBlendStateCreateInfo cb{
         .attachmentCount = 1,
         .pAttachments    = &blend_att,

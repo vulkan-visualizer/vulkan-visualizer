@@ -17,13 +17,12 @@ namespace vk::pipeline {
         Format color_format{};
         Format depth_format{};
         bool use_depth{false};
+        bool use_blend{false};
 
         PrimitiveTopology topology{PrimitiveTopology::eTriangleList};
         CullModeFlags cull{CullModeFlagBits::eBack};
         FrontFace front_face{FrontFace::eCounterClockwise};
         PolygonMode polygon_mode{PolygonMode::eFill};
-
-        bool enable_blend{false};
 
         std::uint32_t push_constant_bytes{0};
         ShaderStageFlags push_constant_stages{ShaderStageFlagBits::eVertex | ShaderStageFlagBits::eFragment};
