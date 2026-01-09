@@ -1,4 +1,7 @@
 module;
+#if defined(_WIN32)
+#define VK_USE_PLATFORM_WIN32_KHR
+#endif
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
@@ -6,20 +9,40 @@ module;
 module vk.context;
 import std;
 
-
 namespace vk::context {
 
+    struct DeviceCreatePolicy {
+        bool prefer_ext_dynamic_state = true;
+        bool want_fill_mode_non_solid = true;
+        bool want_sampler_anisotropy  = true;
+
+        bool want_cuda_interop         = false;
+        bool prefer_timeline_semaphore = true;
+    };
+
+    struct DeviceExtensionPlan {
+        std::vector<const char*> enabled_exts;
+        bool ext_dynamic_state_enabled = false;
+    };
+
     namespace {
+        using ExtSet = std::unordered_set<std::string>;
 
-        struct DeviceCreatePolicy {
-            bool want_ext_dynamic_state   = true;
-            bool want_fill_mode_non_solid = true;
-            bool want_sampler_anisotropy  = true;
-        };
+        [[nodiscard]] ExtSet device_extension_set(const vk::raii::PhysicalDevice& pd) {
+            const auto props = pd.enumerateDeviceExtensionProperties();
 
-        [[nodiscard]] bool has_device_extension(const raii::PhysicalDevice& pd, const char* name) {
-            const auto exts = pd.enumerateDeviceExtensionProperties();
-            return std::ranges::any_of(exts, [name](const auto& e) { return std::strcmp(e.extensionName, name) == 0; });
+            ExtSet set;
+            set.reserve(props.size());
+
+            for (const auto& p : props) {
+                set.emplace(p.extensionName.data()); // 关键：显式转成 const char*
+            }
+
+            return set;
+        }
+
+        [[nodiscard]] bool has_ext(const ExtSet& set, const char* name) {
+            return set.contains(name);
         }
 
         template <typename Properties, typename Accessor>
@@ -42,6 +65,11 @@ namespace vk::context {
             return std::ranges::any_of(families, [](const auto& qf) { return static_cast<bool>(qf.queueFlags & QueueFlagBits::eGraphics); });
         }
 
+        [[nodiscard]] bool has_device_extension(const raii::PhysicalDevice& pd, const char* name) {
+            const auto exts = pd.enumerateDeviceExtensionProperties();
+            return std::ranges::any_of(exts, [name](const auto& e) { return std::strcmp(e.extensionName, name) == 0; });
+        }
+
         [[nodiscard]] bool meets_device_requirements(const raii::PhysicalDevice& device) {
             if (device.getProperties().apiVersion < VK_API_VERSION_1_4) return false;
             if (!supports_graphics_queue(device)) return false;
@@ -59,22 +87,50 @@ namespace vk::context {
             throw std::runtime_error("No queue family supports both graphics and present");
         }
 
-        [[nodiscard]] auto build_feature_chain(const DeviceCreatePolicy& policy, const bool enable_ext_dynamic_state) {
-            StructureChain<PhysicalDeviceFeatures2, PhysicalDeviceVulkan11Features, PhysicalDeviceVulkan13Features, PhysicalDeviceExtendedDynamicStateFeaturesEXT> features{
-                {},
-                {.shaderDrawParameters = VK_TRUE},
-                {.synchronization2 = VK_TRUE, .dynamicRendering = VK_TRUE},
-                {.extendedDynamicState = enable_ext_dynamic_state ? VK_TRUE : VK_FALSE},
-            };
+        [[nodiscard]] auto build_feature_chain(const raii::PhysicalDevice& pd, const DeviceCreatePolicy& policy, const DeviceExtensionPlan& plan) {
+            auto supported = pd.getFeatures2<PhysicalDeviceFeatures2, PhysicalDeviceVulkan11Features, PhysicalDeviceVulkan12Features, PhysicalDeviceVulkan13Features, PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
+
+            StructureChain<PhysicalDeviceFeatures2, PhysicalDeviceVulkan11Features, PhysicalDeviceVulkan12Features, PhysicalDeviceVulkan13Features, PhysicalDeviceExtendedDynamicStateFeaturesEXT> enabled{{}, {}, {}, {}, {}};
+
+            enabled.get<PhysicalDeviceVulkan11Features>().shaderDrawParameters = VK_TRUE;
+
+            if (!supported.get<PhysicalDeviceVulkan13Features>().synchronization2) {
+                throw std::runtime_error("Device does not support Vulkan13 synchronization2");
+            }
+            if (!supported.get<PhysicalDeviceVulkan13Features>().dynamicRendering) {
+                throw std::runtime_error("Device does not support Vulkan13 dynamicRendering");
+            }
+            enabled.get<PhysicalDeviceVulkan13Features>().synchronization2 = VK_TRUE;
+            enabled.get<PhysicalDeviceVulkan13Features>().dynamicRendering = VK_TRUE;
+
+            if (policy.prefer_timeline_semaphore) {
+                if (supported.get<PhysicalDeviceVulkan12Features>().timelineSemaphore) {
+                    enabled.get<PhysicalDeviceVulkan12Features>().timelineSemaphore = VK_TRUE;
+                }
+            }
 
             if (policy.want_fill_mode_non_solid) {
-                features.get<PhysicalDeviceFeatures2>().features.fillModeNonSolid = VK_TRUE;
-            }
-            if (policy.want_sampler_anisotropy) {
-                features.get<PhysicalDeviceFeatures2>().features.samplerAnisotropy = VK_TRUE;
+                if (!supported.get<PhysicalDeviceFeatures2>().features.fillModeNonSolid) {
+                    throw std::runtime_error("Device does not support fillModeNonSolid");
+                }
+                enabled.get<PhysicalDeviceFeatures2>().features.fillModeNonSolid = VK_TRUE;
             }
 
-            return features;
+            if (policy.want_sampler_anisotropy) {
+                if (!supported.get<PhysicalDeviceFeatures2>().features.samplerAnisotropy) {
+                    throw std::runtime_error("Device does not support samplerAnisotropy");
+                }
+                enabled.get<PhysicalDeviceFeatures2>().features.samplerAnisotropy = VK_TRUE;
+            }
+
+            if (plan.ext_dynamic_state_enabled) {
+                if (!supported.get<PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState) {
+                    throw std::runtime_error("VK_EXT_extended_dynamic_state advertised but feature not supported");
+                }
+                enabled.get<PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState = VK_TRUE;
+            }
+
+            return enabled;
         }
 
         [[nodiscard]] Extent2D framebuffer_extent(const std::shared_ptr<GLFWwindow>& window) {
@@ -101,16 +157,49 @@ namespace vk::context {
         }
         return False;
     }
+    [[nodiscard]] DeviceExtensionPlan build_device_extensions(const raii::PhysicalDevice& pd, const DeviceCreatePolicy& policy) {
+        const auto exts = device_extension_set(pd);
 
-    [[nodiscard]] std::vector<const char*> build_device_extensions(const raii::PhysicalDevice& pd, const bool enable_ext_dynamic_state) {
-        std::vector exts{KHRSwapchainExtensionName};
-        if (enable_ext_dynamic_state) {
-            if (!has_device_extension(pd, EXTExtendedDynamicStateExtensionName)) {
-                throw std::runtime_error("Requested VK_EXT_extended_dynamic_state but device does not support it");
+        DeviceExtensionPlan plan{};
+        plan.enabled_exts.reserve(16);
+
+        auto require = [&](const char* name) {
+            if (!has_ext(exts, name)) {
+                std::string msg;
+                msg.reserve(96);
+                msg += "Required device extension not supported: ";
+                msg += name;
+                throw std::runtime_error(msg);
             }
-            exts.push_back(EXTExtendedDynamicStateExtensionName);
+            plan.enabled_exts.push_back(name);
+        };
+
+        auto enable_if = [&](const char* name) -> bool {
+            if (!has_ext(exts, name)) return false;
+            plan.enabled_exts.push_back(name);
+            return true;
+        };
+
+        require(vk::KHRSwapchainExtensionName);
+
+        if (policy.prefer_ext_dynamic_state) {
+            plan.ext_dynamic_state_enabled = enable_if(vk::EXTExtendedDynamicStateExtensionName);
         }
-        return exts;
+
+        if (policy.want_cuda_interop) {
+            require(vk::KHRExternalMemoryExtensionName);
+            require(vk::KHRExternalSemaphoreExtensionName);
+
+#if defined(_WIN32)
+            require(vk::KHRExternalMemoryWin32ExtensionName);
+            require(vk::KHRExternalSemaphoreWin32ExtensionName);
+#else
+            require(vk::KHRExternalMemoryFdExtensionName);
+            require(vk::KHRExternalSemaphoreFdExtensionName);
+#endif
+        }
+
+        return plan;
     }
 
     raii::Instance create_instance_raii(const raii::Context& context, const std::string& app_name, const std::string& engine_name, const std::span<const char* const> required_layers, const std::span<const char* const> required_extensions) {
@@ -136,12 +225,14 @@ namespace vk::context {
     raii::DebugUtilsMessengerEXT create_debug_messenger_raii(const raii::Instance& instance) {
         constexpr DebugUtilsMessageSeverityFlagsEXT severity_flags(DebugUtilsMessageSeverityFlagBitsEXT::eVerbose | DebugUtilsMessageSeverityFlagBitsEXT::eWarning | DebugUtilsMessageSeverityFlagBitsEXT::eError);
         constexpr DebugUtilsMessageTypeFlagsEXT message_type_flags(DebugUtilsMessageTypeFlagBitsEXT::eGeneral | DebugUtilsMessageTypeFlagBitsEXT::ePerformance | DebugUtilsMessageTypeFlagBitsEXT::eValidation);
-        constexpr DebugUtilsMessengerCreateInfoEXT debug_utils_messenger_create_info_EXT{
+
+        constexpr DebugUtilsMessengerCreateInfoEXT ci{
             .messageSeverity = severity_flags,
             .messageType     = message_type_flags,
             .pfnUserCallback = &debug_callback,
         };
-        return instance.createDebugUtilsMessengerEXT(debug_utils_messenger_create_info_EXT);
+
+        return instance.createDebugUtilsMessengerEXT(ci);
     }
 
     auto create_surface_raii(const raii::Instance& instance) {
@@ -162,20 +253,17 @@ namespace vk::context {
 
     raii::PhysicalDevice pick_physical_device_raii(const raii::Instance& instance) {
         const auto devices = instance.enumeratePhysicalDevices();
-
         if (const auto it = std::ranges::find_if(devices, meets_device_requirements); it != devices.end()) {
             return *it;
         }
         throw std::runtime_error("failed to find a suitable GPU");
     }
 
-
     auto create_logical_device_raii(const raii::PhysicalDevice& physical_device, const raii::SurfaceKHR& surface, const DeviceCreatePolicy& policy) {
         const uint32_t graphics_queue_index = find_graphics_present_queue_index(physical_device, surface);
 
-        const bool ext_dyn_state_enabled = policy.want_ext_dynamic_state && has_device_extension(physical_device, EXTExtendedDynamicStateExtensionName);
-        const auto enabled_exts          = build_device_extensions(physical_device, ext_dyn_state_enabled);
-        auto features                    = build_feature_chain(policy, ext_dyn_state_enabled);
+        const auto ext_plan = build_device_extensions(physical_device, policy);
+        auto features       = build_feature_chain(physical_device, policy, ext_plan);
 
         constexpr std::array queue_priority{1.0f};
 
@@ -189,14 +277,14 @@ namespace vk::context {
             .pNext                   = &features.get<PhysicalDeviceFeatures2>(),
             .queueCreateInfoCount    = 1,
             .pQueueCreateInfos       = &queue_ci,
-            .enabledExtensionCount   = static_cast<uint32_t>(enabled_exts.size()),
-            .ppEnabledExtensionNames = enabled_exts.data(),
+            .enabledExtensionCount   = static_cast<uint32_t>(ext_plan.enabled_exts.size()),
+            .ppEnabledExtensionNames = ext_plan.enabled_exts.data(),
         };
 
         auto device         = raii::Device{physical_device, device_ci};
         auto graphics_queue = raii::Queue{device, graphics_queue_index, 0};
 
-        return std::make_tuple(std::move(device), std::move(graphics_queue), graphics_queue_index, enabled_exts);
+        return std::make_tuple(std::move(device), std::move(graphics_queue), graphics_queue_index, ext_plan.enabled_exts);
     }
 
     raii::CommandPool create_command_pool_raii(const raii::Device& device, const uint32_t graphics_queue_index) {
@@ -215,9 +303,9 @@ namespace {
     std::vector<const char*> required_extensions() {
         uint32_t glfw_extension_count = 0;
         const auto glfw_extensions    = glfwGetRequiredInstanceExtensions(&glfw_extension_count);
-        std::vector required_extensions(glfw_extensions, glfw_extensions + glfw_extension_count);
-        required_extensions.push_back(vk::EXTDebugUtilsExtensionName);
-        return required_extensions;
+        std::vector required_exts(glfw_extensions, glfw_extensions + glfw_extension_count);
+        required_exts.push_back(vk::EXTDebugUtilsExtensionName);
+        return required_exts;
     }
 } // namespace
 
@@ -237,10 +325,12 @@ std::pair<vk::context::VulkanContext, vk::context::SurfaceContext> vk::context::
 
     vk_context.physical_device = pick_physical_device_raii(vk_context.instance);
 
-    constexpr DeviceCreatePolicy policy{
-        .want_ext_dynamic_state   = true,
-        .want_fill_mode_non_solid = true,
-        .want_sampler_anisotropy  = true,
+    DeviceCreatePolicy policy{
+        .prefer_ext_dynamic_state  = true,
+        .want_fill_mode_non_solid  = true,
+        .want_sampler_anisotropy   = true,
+        .want_cuda_interop         = false,
+        .prefer_timeline_semaphore = true,
     };
 
     auto [device, graphics_queue, graphics_queue_index, enabled_device_exts] = create_logical_device_raii(vk_context.physical_device, surface_context.surface, policy);
