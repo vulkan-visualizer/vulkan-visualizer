@@ -16,7 +16,7 @@ namespace vk::context {
         bool want_fill_mode_non_solid = true;
         bool want_sampler_anisotropy  = true;
 
-        bool want_cuda_interop         = false;
+        bool want_cuda_interop         = true;
         bool prefer_timeline_semaphore = true;
     };
 
@@ -329,7 +329,7 @@ std::pair<vk::context::VulkanContext, vk::context::SurfaceContext> vk::context::
         .prefer_ext_dynamic_state  = true,
         .want_fill_mode_non_solid  = true,
         .want_sampler_anisotropy   = true,
-        .want_cuda_interop         = false,
+        .want_cuda_interop         = true,
         .prefer_timeline_semaphore = true,
     };
 
