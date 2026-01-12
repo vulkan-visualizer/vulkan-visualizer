@@ -116,7 +116,7 @@ namespace vk::frame {
         c.begin(CommandBufferBeginInfo{.flags = CommandBufferUsageFlagBits::eOneTimeSubmit});
     }
 
-    bool end_frame(const context::VulkanContext& vkctx, const swapchain::Swapchain& sc, FrameSystem& frames, const uint32_t frame_index, const uint32_t image_index) {
+    bool end_frame(const context::VulkanContext& vkctx, const swapchain::Swapchain& sc, FrameSystem& frames, const uint32_t frame_index, const uint32_t image_index, const std::span<const SemaphoreSubmitInfo> extra_waits) {
         auto& c = cmd(frames, frame_index);
         c.end();
 
@@ -124,10 +124,13 @@ namespace vk::frame {
         const Semaphore signal_sem = render_finished_semaphore(frames, image_index);
         const Fence fence          = in_flight_fence(frames, frame_index);
 
-        const SemaphoreSubmitInfo wait{
+        std::vector<SemaphoreSubmitInfo> waits;
+        waits.reserve(1 + extra_waits.size());
+        waits.push_back(SemaphoreSubmitInfo{
             .semaphore = wait_sem,
             .stageMask = PipelineStageFlagBits2::eAllCommands,
-        };
+        });
+        for (const auto& w : extra_waits) waits.push_back(w);
 
         const SemaphoreSubmitInfo signal{
             .semaphore = signal_sem,
@@ -139,8 +142,8 @@ namespace vk::frame {
         };
 
         const SubmitInfo2 submit{
-            .waitSemaphoreInfoCount   = 1,
-            .pWaitSemaphoreInfos      = &wait,
+            .waitSemaphoreInfoCount   = static_cast<uint32_t>(waits.size()),
+            .pWaitSemaphoreInfos      = waits.data(),
             .commandBufferInfoCount   = 1,
             .pCommandBufferInfos      = &cb,
             .signalSemaphoreInfoCount = 1,

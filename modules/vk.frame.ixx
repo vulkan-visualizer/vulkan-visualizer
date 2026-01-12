@@ -39,7 +39,7 @@ namespace vk::frame {
 
     export [[nodiscard]] AcquireResult begin_frame(const context::VulkanContext& vkctx, const swapchain::Swapchain& sc, FrameSystem& frames, uint32_t frame_index);
     export void begin_commands(FrameSystem& frames, uint32_t frame_index);
-    export [[nodiscard]] bool end_frame(const context::VulkanContext& vkctx, const swapchain::Swapchain& sc, FrameSystem& frames, uint32_t frame_index, uint32_t image_index);
+    export [[nodiscard]] bool end_frame(const context::VulkanContext& vkctx, const swapchain::Swapchain& sc, FrameSystem& frames, uint32_t frame_index, uint32_t image_index, const std::span<const vk::SemaphoreSubmitInfo> extra_waits = {});
 
     export [[nodiscard]] raii::CommandBuffer& cmd(FrameSystem& frames, uint32_t frame_index);
     export [[nodiscard]] const raii::CommandBuffer& cmd(const FrameSystem& frames, uint32_t frame_index);
