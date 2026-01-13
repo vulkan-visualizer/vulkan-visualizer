@@ -1,18 +1,33 @@
-name: windows-build
+# .github/workflows/windows-build.yml
+name: Windows Build
 
 on:
   push:
+    branches: [ "**" ]
+    tags: [ "v*.*.*" ]
   pull_request:
-  workflow_dispatch:
+    branches: [ "**" ]
+  workflow_dispatch: { }
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   build:
+    name: MSVC (VS 2022) Release
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-      - name: Setup MSVC
+      - name: Setup MSVC dev cmd
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install Vulkan SDK
@@ -23,8 +38,12 @@ jobs:
           cache: true
 
       - name: Configure
+        shell: pwsh
         run: >
-          cmake -S . -B build -G "Visual Studio 17 2022" -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -G "Visual Studio 17 2022"
+          -DCMAKE_CONFIGURATION_TYPES=Release
 
       - name: Build
-        run: cmake --build build --parallel
+        shell: pwsh
+        run: >
+          cmake --build build --config Release --parallel

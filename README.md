@@ -1,4 +1,8 @@
-# Vulkan Visualizer 1.2.0
+# Vulkan Visualizer 1.3.0
+
+[![windows-build](https://github.com/vulkan-visualizer/vulkan-visualizer/actions/workflows/windows-build.yml/badge.svg)](https://github.com/IME-lab-Hokudai/phys-ngp-fused/actions/workflows/windows-build.yml)
+[![arch-linux-build](https://github.com/vulkan-visualizer/vulkan-visualizer/actions/workflows/arch-linux-build.yml/badge.svg)](https://github.com/vulkan-visualizer/vulkan-visualizer/actions/workflows/arch-linux-build.yml)
+[![docker-ghcr](https://github.com/vulkan-visualizer/vulkan-visualizer/actions/workflows/docker-ghcr.yml/badge.svg)](https://github.com/vulkan-visualizer/vulkan-visualizer/actions/workflows/docker-ghcr.yml)
 
 A modular C++23 + Vulkan 1.3 framework for rapid prototyping of graphics applications and renderers using a pure C++ module interface.
 

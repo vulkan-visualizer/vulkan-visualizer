@@ -38,15 +38,6 @@ namespace vk::pipeline {
     export template <typename VertexT>
     [[nodiscard]] VertexInput make_vertex_input();
 
-    export template <>
-    [[nodiscard]] VertexInput make_vertex_input<geometry::VertexP2C4>();
-    export template <>
-    [[nodiscard]] VertexInput make_vertex_input<geometry::VertexP3C4>();
-    export template <>
-    [[nodiscard]] VertexInput make_vertex_input<geometry::VertexP3C4T2>();
-    export template <>
-    [[nodiscard]] VertexInput make_vertex_input<geometry::Vertex>();
-
     export [[nodiscard]] std::vector<std::byte> read_file_bytes(const std::string& path);
     export [[nodiscard]] raii::ShaderModule load_shader_module(const raii::Device& device, std::span<const std::byte> spv);
     export [[nodiscard]] GraphicsPipeline create_graphics_pipeline(const raii::Device& device, const VertexInput& vin, const GraphicsPipelineDesc& desc, const raii::ShaderModule& shader_module, const char* vs_entry, const char* fs_entry);
