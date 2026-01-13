@@ -8,39 +8,18 @@ namespace vk::memory {
         raii::Buffer buffer{nullptr};
         raii::DeviceMemory memory{nullptr};
         DeviceSize size{0};
-
-        Buffer()                             = default;
-        ~Buffer()                            = default;
-        Buffer(const Buffer&)                = delete;
-        Buffer& operator=(const Buffer&)     = delete;
-        Buffer(Buffer&&) noexcept            = default;
-        Buffer& operator=(Buffer&&) noexcept = default;
     };
 
     export struct MeshGPU {
         Buffer vertex_buffer;
         Buffer index_buffer;
         uint32_t index_count{0};
-
-        MeshGPU()                              = default;
-        ~MeshGPU()                             = default;
-        MeshGPU(const MeshGPU&)                = delete;
-        MeshGPU& operator=(const MeshGPU&)     = delete;
-        MeshGPU(MeshGPU&&) noexcept            = default;
-        MeshGPU& operator=(MeshGPU&&) noexcept = default;
     };
 
     export template <typename VertexT>
     struct MeshCPU {
         std::vector<VertexT> vertices;
         std::vector<uint32_t> indices;
-
-        MeshCPU()                              = default;
-        ~MeshCPU()                             = default;
-        MeshCPU(const MeshCPU&)                = delete;
-        MeshCPU& operator=(const MeshCPU&)     = delete;
-        MeshCPU(MeshCPU&&) noexcept            = default;
-        MeshCPU& operator=(MeshCPU&&) noexcept = default;
     };
 
     export [[nodiscard]] uint32_t find_memory_type(const raii::PhysicalDevice& physical_device, uint32_t type_bits, MemoryPropertyFlags required);
