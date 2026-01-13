@@ -1,0 +1,85 @@
+# .github/workflows/arch-linux-build.yml
+name: Arch Linux Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: arch-linux-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (Arch Linux, GCC, CMake+Ninja)
+    runs-on: ubuntu-latest
+
+    # Run the entire job inside an Arch container
+    container:
+      image: archlinux:latest
+
+    steps:
+      - name: Prepare Arch keyring + update system
+        shell: bash
+        run: |
+          set -euxo pipefail
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Syu --noconfirm
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          pacman -S --noconfirm --needed \
+            base-devel \
+            git \
+            cmake \
+            ninja \
+            gcc \
+            pkgconf \
+            vulkan-devel \
+            shaderc \
+            glslang \
+            xorgproto \
+            libx11 \
+            libxrandr \
+            libxinerama \
+            libxcursor \
+            libxi \
+            libxext \
+            libxrender \
+            libxfixes \
+            wayland \
+            wayland-protocols \
+            libxkbcommon
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_EXTENSIONS=ON
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --build build --parallel
+
+      - name: Test (if present)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if [ -f build/CTestTestfile.cmake ] || [ -d build/Testing ]; then
+            ctest --test-dir build --output-on-failure
+          else
+            echo "No tests detected; skipping."
+          fi

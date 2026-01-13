@@ -1,12 +1,19 @@
-cmake_minimum_required(VERSION 3.28)
-project(vulkan_visualizer VERSION 1.2.0 LANGUAGES CXX)
+cmake_minimum_required(VERSION 4.0)
+
+# Enable experimental `import std` ONLY on non-Windows (Linux/WSL).
+# Must be set before project() enables CXX.
+if(NOT WIN32)
+    set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "d0edc3af-4c50-42ea-a356-e2862fe7a444")
+endif()
+
+project(vulkan_visualizer VERSION 1.3.0 LANGUAGES CXX)
 
 # ============================================================================
 # C++ Configuration
 # ============================================================================
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_EXTENSIONS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_EXPERIMENTAL_CXX_MODULE_CMAKE_API ON)
@@ -80,3 +87,9 @@ target_compile_definitions(vk-core PUBLIC VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1 V
 target_include_directories(vk-core PUBLIC
         $<BUILD_INTERFACE:${imgui_SOURCE_DIR}>
 )
+
+# Linux/WSL (GCC+libstdc++): tell CMake this target uses the std module
+# Do NOT set CMAKE_CXX_MODULE_STD globally, or it will affect glfw.
+if(NOT WIN32)
+    set_property(TARGET vk-core PROPERTY CXX_MODULE_STD ON)
+endif()

@@ -105,7 +105,7 @@ namespace vk::imgui {
         ImGui::NewFrame();
     }
 
-    void vk::imgui::end_frame() {
+    void end_frame() {
         if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
             ImGui::UpdatePlatformWindows();
             ImGui::RenderPlatformWindowsDefault();
@@ -129,7 +129,7 @@ namespace vk::imgui {
         ImGui_ImplVulkan_SetMinImageCount(static_cast<int>(min_image_count));
     }
 
-    void imgui::draw_mini_axis_gizmo(const math::mat4& c2w) {
+    void draw_mini_axis_gizmo(const math::mat4& c2w) {
         ImGuiViewport* viewport = ImGui::GetMainViewport();
         if (!viewport) return;
 
