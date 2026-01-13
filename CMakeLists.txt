@@ -1,9 +1,10 @@
-cmake_minimum_required(VERSION 4.0)
-
 # Enable experimental `import std` ONLY on non-Windows (Linux/WSL).
 # Must be set before project() enables CXX.
 if(NOT WIN32)
+    cmake_minimum_required(VERSION 4.0)
     set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "d0edc3af-4c50-42ea-a356-e2862fe7a444")
+else ()
+    cmake_minimum_required(VERSION 3.31)
 endif()
 
 project(vulkan_visualizer VERSION 1.3.0 LANGUAGES CXX)
