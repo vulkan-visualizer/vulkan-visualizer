@@ -1,12 +1,5 @@
-# Enable experimental `import std` ONLY on non-Windows (Linux/WSL).
-# Must be set before project() enables CXX.
-if(NOT WIN32)
-    cmake_minimum_required(VERSION 4.0)
-    set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "d0edc3af-4c50-42ea-a356-e2862fe7a444")
-else ()
-    cmake_minimum_required(VERSION 3.31)
-endif()
-
+cmake_minimum_required(VERSION 4.1.2)
+set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "d0edc3af-4c50-42ea-a356-e2862fe7a444")
 project(vulkan_visualizer VERSION 1.3.0 LANGUAGES CXX)
 
 # ============================================================================
@@ -91,6 +84,4 @@ target_include_directories(vk-core PUBLIC
 
 # Linux/WSL (GCC+libstdc++): tell CMake this target uses the std module
 # Do NOT set CMAKE_CXX_MODULE_STD globally, or it will affect glfw.
-if(NOT WIN32)
-    set_property(TARGET vk-core PROPERTY CXX_MODULE_STD ON)
-endif()
+set_property(TARGET vk-core PROPERTY CXX_MODULE_STD ON)
