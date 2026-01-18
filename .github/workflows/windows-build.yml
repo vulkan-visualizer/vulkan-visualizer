@@ -30,6 +30,9 @@ jobs:
       - name: Setup MSVC dev cmd
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Install CMake
+        uses: ssrobins/install-cmake@v1
+
       - name: Install Vulkan SDK
         uses: jakoch/install-vulkan-sdk-action@v1
         with:

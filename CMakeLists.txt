@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 4.1.2)
 set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "d0edc3af-4c50-42ea-a356-e2862fe7a444")
-project(vulkan_visualizer VERSION 1.3.0 LANGUAGES CXX)
+project(vulkan_visualizer VERSION 1.4.0 LANGUAGES CXX)
 
 # ============================================================================
 # C++ Configuration
@@ -18,26 +18,15 @@ set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 # Dependencies
 # ============================================================================
 find_package(Vulkan REQUIRED)
-include(FetchContent)
-set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(glfw
-        GIT_REPOSITORY https://github.com/glfw/glfw.git
-        GIT_TAG 3.4
-        GIT_SHALLOW TRUE
-)
-FetchContent_Declare(imgui
-        GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG v1.92.2b-docking
-        GIT_SHALLOW TRUE
-)
-FetchContent_MakeAvailable(glfw imgui)
-
 set(_VULKAN_HPP_IMPL "${CMAKE_CURRENT_BINARY_DIR}/_vulkan_hpp_impl.cpp")
 file(WRITE "${_VULKAN_HPP_IMPL}" [[
 #include <vulkan/vulkan_raii.hpp>
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 ]])
+set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(dependencies/glfw)
+set(imgui_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/imgui")
 set(_IMGUI_SOURCES
         ${imgui_SOURCE_DIR}/imgui.cpp
         ${imgui_SOURCE_DIR}/imgui_demo.cpp
@@ -62,7 +51,6 @@ target_sources(vk-core
         src/vk.pipeline.cpp
         src/vk.swapchain.cpp
         src/vk.texture.cpp
-        # ${_VULKAN_HPP_IMPL}
         ${_IMGUI_SOURCES}
         PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
         modules/vk.camera.ixx

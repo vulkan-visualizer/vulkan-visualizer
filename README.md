@@ -1,10 +1,10 @@
-# Vulkan Visualizer 1.3.0
+# Vulkan Visualizer 1.4.0
 
 [![windows-build](https://github.com/vulkan-visualizer/vulkan-visualizer/actions/workflows/windows-build.yml/badge.svg)](https://github.com/IME-lab-Hokudai/phys-ngp-fused/actions/workflows/windows-build.yml)
 [![arch-linux-build](https://github.com/vulkan-visualizer/vulkan-visualizer/actions/workflows/arch-linux-build.yml/badge.svg)](https://github.com/vulkan-visualizer/vulkan-visualizer/actions/workflows/arch-linux-build.yml)
 [![docker-ghcr](https://github.com/vulkan-visualizer/vulkan-visualizer/actions/workflows/docker-ghcr.yml/badge.svg)](https://github.com/vulkan-visualizer/vulkan-visualizer/actions/workflows/docker-ghcr.yml)
 
-A modular C++23 + Vulkan 1.3 framework for rapid prototyping of graphics applications and renderers using a pure C++ module interface.
+A modular C++23 + Vulkan 1.4 framework for rapid prototyping of graphics applications and renderers using a pure C++ module interface.
 
 This repository provides a lightweight, module-first graphics toolkit (no public header surface) built on `vulkan-hpp` RAII wrappers. It handles Vulkan context creation, swapchain management, frame synchronization, shader compilation via Slang, and ImGui integration, allowing you to focus on experimenting with rendering techniques.
 
@@ -17,7 +17,7 @@ This repository provides a lightweight, module-first graphics toolkit (no public
 - **Geometry toolkit** — procedural mesh generation (sphere, cube) and vertex upload utilities.
 - **Platform windowing** — GLFW 3.4 for window creation and input events.
 
-## What's new in v1.2.0
+## What's new in v1.4.0
 - **Architectural overhaul:** Refactored from monolithic engine to modular toolkit approach with 9 independent modules.
 - **Replaced SDL3 with GLFW 3.4** for simplified windowing and broader platform support.
 - **Slang shader compiler integration** — CMake function `add_slang_shader_target()` automates SPIR-V compilation from `.slang` sources.
